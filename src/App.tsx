@@ -1,0 +1,520 @@
+import React, { useState, useMemo } from 'react';
+import { initialData } from './data';
+import { Consultation, SortField, SortOrder, DEFAULT_STATUS_OPTIONS, ENROLLED_STATUS, getStatusStyle } from './types';
+import { EditableRow } from './components/EditableRow';
+import { EditableListItem } from './components/EditableListItem';
+import { Search, Plus, ArrowUpDown, ChevronDown, ChevronUp, RotateCcw, Settings, X } from 'lucide-react';
+
+// 요약 카드 및 좁은 화면용 짧은 라벨
+const STATUS_SHORT_LABEL: Record<string, string> = {
+  '초기 문의': '초기 문의',
+  '레벨테스트 완료 (등록 여부 미정)': '레벨테스트 완료',
+  '반 배정 완료 (등록 대기)': '반배정 완료',
+  '신규 반 개설 대기': '신규 반 대기',
+  '기존 반 대기 (정원 초과)': '기존 반 대기',
+  '등록 취소/보류': '등록 취소/보류',
+  '원생 (등록완료)': '원생',
+};
+
+// 'G12' -> 12, 'G8 Add Math' -> 8, 없으면 -1
+const gradeNum = (s: string): number => {
+  const m = (s || '').match(/G\s*(\d+)/i);
+  return m ? parseInt(m[1], 10) : -1;
+};
+
+// 학년(G숫자) 내림차순, 같은 학년 내에서는 이름 오름차순
+const sortByGradeDesc = (arr: string[]): string[] =>
+  [...arr].sort((a, b) => gradeNum(b) - gradeNum(a) || a.localeCompare(b));
+
+// 학생번호 뒤 숫자만 추출 (STU202605-0240 -> 240)
+const studentNumTrailing = (s?: string): number => {
+  const m = (s || '').match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : -1;
+};
+
+// 학생번호 마지막 3자리만 표시 (0240 -> 240, 1 -> 001)
+const shortStudentNum = (s?: string): string => {
+  const m = (s || '').match(/(\d+)\s*$/);
+  if (!m) return s || '';
+  return m[1].slice(-3).padStart(3, '0');
+};
+
+// 가장 높은 학생번호 + 1 (중복 방지 auto-increment)
+const getNextStudentNumber = (data: Consultation[]): string => {
+  let max = 0;
+  let template = 'STU2026-0000';
+  for (const d of data) {
+    const n = studentNumTrailing(d.studentNumber);
+    if (n > max) {
+      max = n;
+      template = d.studentNumber!;
+    }
+  }
+  const m = template.match(/(\d+)(\s*)$/);
+  const width = m ? m[1].length : 4;
+  const next = String(max + 1).padStart(width, '0');
+  return template.replace(/\d+\s*$/, next);
+};
+
+export default function App() {
+  const [data, setData] = useState<Consultation[]>(
+    [...initialData].sort((a, b) => b.date.localeCompare(a.date))
+  );
+  const [isSummaryExpanded, setIsSummaryExpanded] = useState(true);
+  const [statusOptions, setStatusOptions] = useState<string[]>(DEFAULT_STATUS_OPTIONS);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsNewStatus, setSettingsNewStatus] = useState('');
+  const [settingsNewClass, setSettingsNewClass] = useState('');
+  
+  // Filters and Sorting
+  const [activeTab, setActiveTab] = useState<'all' | '원생' | '예비원생'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [gradeFilter, setGradeFilter] = useState<string>('all');
+  const [classFilter, setClassFilter] = useState<string>('all');
+  
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  // Derived options for filters
+  const schools = useMemo(() => Array.from(new Set(data.map(d => d.school))).filter(Boolean).sort(), [data]);
+  const grades = useMemo(() => sortByGradeDesc([...new Set(data.map(d => d.grade))].filter((g): g is string => Boolean(g))), [data]);
+  const [classOptions, setClassOptions] = useState<string[]>([]);
+  React.useEffect(() => {
+    if (classOptions.length === 0 && data.length > 0) {
+      setClassOptions(sortByGradeDesc([...new Set(data.map(d => d.className))].filter((c): c is string => Boolean(c) && c !== '-')));
+    }
+  }, [data]);
+
+  // 원생 등록용 다음 학생번호 (최대 번호 + 1)
+  const nextStudentNumber = useMemo(() => getNextStudentNumber(data), [data]);
+
+  // Derived summary counts
+  const summaryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    statusOptions.forEach(status => {
+      counts[status] = 0;
+    });
+    data.forEach(item => {
+      if (counts[item.status] !== undefined) {
+        counts[item.status]++;
+      }
+    });
+    return counts;
+  }, [data, statusOptions]);
+
+  // Filtered and sorted data
+  const processedData = useMemo(() => {
+    let result = [...data];
+
+    // Apply Tab Filter
+    if (activeTab === '원생') {
+      result = result.filter(item => item.status === ENROLLED_STATUS);
+    } else if (activeTab === '예비원생') {
+      result = result.filter(item => item.status !== ENROLLED_STATUS);
+    }
+
+    // Apply Search
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(
+        item => item.name.toLowerCase().includes(term) || item.school.toLowerCase().includes(term)
+      );
+    }
+
+    // Apply Filters
+    if (statusFilter !== 'all') {
+      result = result.filter(item => item.status === statusFilter);
+    }
+    if (gradeFilter !== 'all') {
+      result = result.filter(item => item.grade === gradeFilter);
+    }
+    if (classFilter !== 'all') {
+      result = result.filter(item => item.className === classFilter);
+    }
+
+    // Apply Sorting
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    result.sort((a, b) => {
+      // 학생번호: 뒤 숫자 기준 숫자 정렬
+      if (sortField === 'studentNumber') {
+        return (studentNumTrailing(a.studentNumber) - studentNumTrailing(b.studentNumber)) * dir;
+      }
+      // 반: 학년(G숫자) 기준 정렬 후 이름
+      if (sortField === 'className') {
+        const g = gradeNum(a.className) - gradeNum(b.className);
+        if (g !== 0) return g * dir;
+        return a.className.localeCompare(b.className) * dir;
+      }
+      const valA = a[sortField] || '';
+      const valB = b[sortField] || '';
+      if (valA < valB) return -1 * dir;
+      if (valA > valB) return 1 * dir;
+      return 0;
+    });
+
+    return result;
+  }, [data, searchTerm, statusFilter, gradeFilter, classFilter, sortField, sortOrder, activeTab]);
+
+  // 원생 탭 진입 시 학생번호 오름차순으로 기본 정렬, 나올 때 날짜 내림차순 복귀
+  React.useEffect(() => {
+    if (activeTab === '원생') {
+      setSortField('studentNumber');
+      setSortOrder('asc');
+    } else {
+      setSortField('date');
+      setSortOrder('desc');
+    }
+  }, [activeTab]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const handleResetAll = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setGradeFilter('all');
+    setClassFilter('all');
+    setSortField('date');
+    setSortOrder('desc');
+  };
+
+  const handleRenameStatus = (oldStatus: string, newStatus: string) => {
+    if (newStatus.trim() && newStatus !== oldStatus) {
+      const trimmed = newStatus.trim();
+      setStatusOptions(statusOptions.map(s => s === oldStatus ? trimmed : s));
+      setData(data.map(d => d.status === oldStatus ? { ...d, status: trimmed as any } : d));
+    }
+  };
+
+  const handleRenameClass = (oldClass: string, newClass: string) => {
+    if (newClass.trim() && newClass !== oldClass) {
+      const trimmed = newClass.trim();
+      setClassOptions(sortByGradeDesc(classOptions.map(c => c === oldClass ? trimmed : c)));
+      setData(data.map(d => d.className === oldClass ? { ...d, className: trimmed } : d));
+    }
+  };
+
+  const handleSaveRow = (updatedRow: Consultation) => {
+    setData(prev => prev.map(row => row.id === updatedRow.id ? updatedRow : row));
+  };
+
+  const handleAddConsultation = () => {
+    const newId = (Math.max(...data.map(d => parseInt(d.id) || 0)) + 1).toString();
+    const newEntry: Consultation = {
+      id: newId,
+      date: new Date().toISOString().split('T')[0],
+      name: '',
+      school: '',
+      grade: '',
+      status: '초기 문의',
+      className: '-',
+      notes: []
+    };
+    setData([newEntry, ...data]);
+    setSortField('date');
+    setSortOrder('desc');
+  };
+
+  const isStudentView = activeTab === '원생';
+
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col">
+      {/* Header & Control Bar */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+        <div className="px-4 py-3 flex items-center gap-4">
+          {/* Left: 타이틀 + 탭 */}
+          <div className="flex items-center gap-4 shrink-0">
+            <h1 
+              className="text-lg font-bold tracking-tight text-gray-800 cursor-pointer hover:text-blue-600 transition-colors"
+              onClick={handleResetAll}
+            >
+              학생현황판
+            </h1>
+            <div className="flex bg-gray-100 p-1 rounded-lg">
+              <button
+                onClick={() => setActiveTab('all')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'all' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                전체
+              </button>
+              <button
+                onClick={() => setActiveTab('원생')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                원생
+              </button>
+              <button
+                onClick={() => setActiveTab('예비원생')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '예비원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                예비원생
+              </button>
+            </div>
+          </div>
+
+          {/* Center: 검색 + 필터 (가운데 정렬) */}
+          <div className="flex-1 flex items-center justify-center gap-3">
+            <div className="relative flex items-center">
+              <Search className="w-4 h-4 absolute left-2 text-gray-400" />
+              <input 
+                type="text" 
+                placeholder="이름 또는 학교 검색..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-64 outline-none"
+              />
+            </div>
+            <select 
+              value={gradeFilter} 
+              onChange={(e) => setGradeFilter(e.target.value)}
+              className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto text-center font-medium"
+              style={{ textAlignLast: 'center' }}
+            >
+              <option value="all">모든 학년</option>
+              {grades.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            <select 
+              value={classFilter} 
+              onChange={(e) => setClassFilter(e.target.value)}
+              className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto max-w-[220px] text-center font-medium"
+              style={{ textAlignLast: 'center' }}
+            >
+              <option value="all">모든 반</option>
+              {classOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+          </div>
+
+          {/* Right: 액션 버튼 */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button 
+              onClick={handleResetAll}
+              className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
+              title="초기화"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              초기화
+            </button>
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
+              title="설정"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={handleAddConsultation}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              신규 문의
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-hidden p-4 flex flex-col gap-4">
+        
+        {/* Summary Cards */}
+        <div className="flex flex-col gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+             <button 
+               onClick={() => setIsSummaryExpanded(!isSummaryExpanded)} 
+               className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+             >
+               Status 요약
+               {isSummaryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+             </button>
+          </div>
+          {isSummaryExpanded && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+              {statusOptions.map((status) => (
+                <div
+                  key={status}
+                  className={`rounded-lg border px-3 py-2 flex flex-col justify-center cursor-pointer hover:shadow-sm transition-shadow ${getStatusStyle(status).card} ${statusFilter === status ? 'ring-2 ring-offset-1 ring-blue-400' : ''}`}
+                  onClick={() => setStatusFilter(statusFilter === status ? 'all' : status)}
+                >
+                  <div className="text-[10px] sm:text-xs font-semibold tracking-wide opacity-80 mb-0.5 truncate" title={status}>{STATUS_SHORT_LABEL[status] || status}</div>
+                  <div className="text-xl sm:text-2xl font-bold leading-none">{summaryCounts[status] || 0}<span className="text-sm font-normal ml-1 opacity-70">명</span></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Data Table */}
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col">
+          <div className="overflow-auto flex-1">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 sticky top-0 z-10">
+                <tr>
+                  {isStudentView ? (
+                    <th 
+                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[90px]"
+                      onClick={() => handleSort('studentNumber')}
+                    >
+                      <div className="flex items-center gap-1">학생번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    </th>
+                  ) : (
+                    <th 
+                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[100px]"
+                      onClick={() => handleSort('date')}
+                    >
+                      <div className="flex items-center gap-1">최초 문의 날짜 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    </th>
+                  )}
+                  <th 
+                    className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors min-w-[140px]"
+                    onClick={() => handleSort('name')}
+                  >
+                    <div className="flex items-center gap-1">이름 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                  </th>
+                  <th className="px-2 py-2 whitespace-nowrap w-[120px]">Note</th>
+                  <th className="px-2 py-2 whitespace-nowrap w-[140px]">학교</th>
+                  <th className="px-2 py-2 whitespace-nowrap w-[60px]">학년</th>
+                  {isStudentView ? (
+                    <th 
+                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[140px]"
+                      onClick={() => handleSort('studentPhone')}
+                    >
+                      <div className="flex items-center gap-1">학생 전화번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    </th>
+                  ) : (
+                    <th 
+                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[180px]"
+                      onClick={() => handleSort('status')}
+                    >
+                      <div className="flex items-center gap-1 flex-1 justify-center">Status <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    </th>
+                  )}
+                  <th 
+                    className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors whitespace-nowrap w-[120px]"
+                    onClick={() => handleSort('className')}
+                  >
+                    <div className="flex items-center gap-1">반 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                  </th>
+                  <th className="px-2 py-2 whitespace-nowrap min-w-[200px]">상담내역</th>
+                  <th className="px-2 py-2 whitespace-nowrap w-[60px]"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {processedData.length > 0 ? (
+                  processedData.map((row) => (
+                    <EditableRow key={row.id} data={row} onSave={handleSaveRow} statusOptions={statusOptions} classOptions={classOptions} schoolOptions={schools} gradeOptions={grades} isStudentView={isStudentView} nextStudentNumber={nextStudentNumber} displayStudentNumber={shortStudentNum} />
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500 text-sm">
+                      조건에 맞는 상담 내역이 없습니다.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="bg-gray-50 border-t border-gray-200 px-4 py-2 text-xs text-gray-500 flex justify-between">
+            <span>총 {processedData.length}건</span>
+            <span>데이터는 브라우저 메모리에 임시 저장됩니다.</span>
+          </div>
+        </div>
+      </main>
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
+              <h2 className="text-lg font-bold text-gray-900">목록 설정</h2>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-gray-500 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Status Options */}
+              <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">상태 (Status) 목록</div>
+                <div className="p-3">
+                  <div className="flex gap-2 mb-3">
+                    <input 
+                      type="text" 
+                      value={settingsNewStatus}
+                      onChange={e => setSettingsNewStatus(e.target.value)}
+                      placeholder="새로운 상태 입력..."
+                      className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button 
+                      onClick={() => {
+                        if (settingsNewStatus.trim() && !statusOptions.includes(settingsNewStatus.trim())) {
+                          setStatusOptions([...statusOptions, settingsNewStatus.trim()]);
+                          setSettingsNewStatus('');
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+                    >
+                      추가
+                    </button>
+                  </div>
+                  <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {statusOptions.map(status => (
+                      <EditableListItem 
+                        key={status} 
+                        value={status} 
+                        onRename={handleRenameStatus}
+                        onDelete={() => setStatusOptions(statusOptions.filter(s => s !== status))}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Class Options */}
+              <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">반 (Class) 목록</div>
+                <div className="p-3">
+                  <div className="flex gap-2 mb-3">
+                    <input 
+                      type="text" 
+                      value={settingsNewClass}
+                      onChange={e => setSettingsNewClass(e.target.value)}
+                      placeholder="새로운 반 입력..."
+                      className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button 
+                      onClick={() => {
+                        if (settingsNewClass.trim() && !classOptions.includes(settingsNewClass.trim())) {
+                          setClassOptions(sortByGradeDesc([...classOptions, settingsNewClass.trim()]));
+                          setSettingsNewClass('');
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+                    >
+                      추가
+                    </button>
+                  </div>
+                  <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {classOptions.map(cls => (
+                      <EditableListItem 
+                        key={cls} 
+                        value={cls} 
+                        onRename={handleRenameClass}
+                        onDelete={() => setClassOptions(classOptions.filter(c => c !== cls))}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

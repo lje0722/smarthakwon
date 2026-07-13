@@ -1,0 +1,6 @@
+{
+  "name": "학원 상담 관리 대시보드",
+  "description": "싱가포르 교육기획팀을 위한 학원 문의 및 상담 현황 실시간 관리 프로토타입",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
