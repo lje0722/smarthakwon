@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { initialData } from './data';
 import { Consultation, SortField, SortOrder, DEFAULT_STATUS_OPTIONS, ENROLLED_STATUS, getStatusStyle } from './types';
 import { EditableRow } from './components/EditableRow';
 import { EditableListItem } from './components/EditableListItem';
+import { ClassBoard } from './components/ClassBoard';
+import { TEACHER_ORDER } from './classData';
 import { Search, Plus, ArrowUpDown, ChevronDown, ChevronUp, RotateCcw, Settings, X } from 'lucide-react';
 
 // 요약 카드 및 좁은 화면용 짧은 라벨
@@ -62,6 +64,27 @@ export default function App() {
   );
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(true);
   const [statusOptions, setStatusOptions] = useState<string[]>(DEFAULT_STATUS_OPTIONS);
+
+  // 페이지 전환 (학생현황판 / 수업현황판)
+  const [page, setPage] = useState<'students' | 'classes'>('students');
+  const [classSearch, setClassSearch] = useState('');
+  const [teacherFilter, setTeacherFilter] = useState<string>('all');
+  const studentSearchRef = useRef<HTMLInputElement>(null);
+  const classSearchRef = useRef<HTMLInputElement>(null);
+
+  // Ctrl/Cmd+F → 상단 앱 검색창 포커스 (브라우저 기본 검색 대신)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        const el = page === 'classes' ? classSearchRef.current : studentSearchRef.current;
+        el?.focus();
+        el?.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [page]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsNewStatus, setSettingsNewStatus] = useState('');
   const [settingsNewClass, setSettingsNewClass] = useState('');
@@ -227,100 +250,139 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col">
       {/* Header & Control Bar */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
         <div className="px-4 py-3 flex items-center gap-4">
-          {/* Left: 타이틀 + 탭 */}
-          <div className="flex items-center gap-4 shrink-0">
-            <h1 
-              className="text-lg font-bold tracking-tight text-gray-800 cursor-pointer hover:text-blue-600 transition-colors"
-              onClick={handleResetAll}
-            >
-              학생현황판
-            </h1>
+          {/* Left: 페이지 전환 + 페이지별 서브 컨트롤 */}
+          <div className="flex items-center gap-3 shrink-0">
             <div className="flex bg-gray-100 p-1 rounded-lg">
               <button
-                onClick={() => setActiveTab('all')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'all' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setPage('students')}
+                className={`px-3 py-1.5 text-sm font-bold rounded-md transition-all ${page === 'students' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                전체
+                학생현황판
               </button>
               <button
-                onClick={() => setActiveTab('원생')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setPage('classes')}
+                className={`px-3 py-1.5 text-sm font-bold rounded-md transition-all ${page === 'classes' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                원생
-              </button>
-              <button
-                onClick={() => setActiveTab('예비원생')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '예비원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                예비원생
+                수업현황판
               </button>
             </div>
+
+            {page === 'students' && (
+              <div className="flex bg-gray-100 p-1 rounded-lg">
+                <button onClick={() => setActiveTab('all')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'all' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>전체</button>
+                <button onClick={() => setActiveTab('원생')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>원생</button>
+                <button onClick={() => setActiveTab('예비원생')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '예비원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>예비원생</button>
+              </div>
+            )}
+
+            {page === 'classes' && (
+              <span className="text-sm font-semibold text-gray-600 bg-gray-100 rounded-lg px-3 py-1.5 whitespace-nowrap">
+                2026 여름 특강 참석표
+              </span>
+            )}
           </div>
 
           {/* Center: 검색 + 필터 (가운데 정렬) */}
           <div className="flex-1 flex items-center justify-center gap-3">
-            <div className="relative flex items-center">
-              <Search className="w-4 h-4 absolute left-2 text-gray-400" />
-              <input 
-                type="text" 
-                placeholder="이름 또는 학교 검색..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-64 outline-none"
-              />
-            </div>
-            <select 
-              value={gradeFilter} 
-              onChange={(e) => setGradeFilter(e.target.value)}
-              className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto text-center font-medium"
-              style={{ textAlignLast: 'center' }}
-            >
-              <option value="all">모든 학년</option>
-              {grades.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-            <select 
-              value={classFilter} 
-              onChange={(e) => setClassFilter(e.target.value)}
-              className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto max-w-[220px] text-center font-medium"
-              style={{ textAlignLast: 'center' }}
-            >
-              <option value="all">모든 반</option>
-              {classOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
+            {page === 'students' ? (
+              <>
+                <div className="relative flex items-center">
+                  <Search className="w-4 h-4 absolute left-2 text-gray-400" />
+                  <input
+                    ref={studentSearchRef}
+                    type="text"
+                    placeholder="이름 또는 학교 검색..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-64 outline-none"
+                  />
+                </div>
+                <select
+                  value={gradeFilter}
+                  onChange={(e) => setGradeFilter(e.target.value)}
+                  className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto text-center font-medium"
+                  style={{ textAlignLast: 'center' }}
+                >
+                  <option value="all">모든 학년</option>
+                  {grades.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+                <select
+                  value={classFilter}
+                  onChange={(e) => setClassFilter(e.target.value)}
+                  className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto max-w-[220px] text-center font-medium"
+                  style={{ textAlignLast: 'center' }}
+                >
+                  <option value="all">모든 반</option>
+                  {classOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <div className="relative flex items-center">
+                  <Search className="w-4 h-4 absolute left-2 text-gray-400" />
+                  <input
+                    ref={classSearchRef}
+                    type="text"
+                    placeholder="반 또는 학생 검색... (Ctrl+F)"
+                    value={classSearch}
+                    onChange={(e) => setClassSearch(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-72 outline-none"
+                  />
+                </div>
+                <select
+                  value={teacherFilter}
+                  onChange={(e) => setTeacherFilter(e.target.value)}
+                  className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto text-center font-medium"
+                  style={{ textAlignLast: 'center' }}
+                >
+                  <option value="all">모든 선생님</option>
+                  {TEACHER_ORDER.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
 
           {/* Right: 액션 버튼 */}
           <div className="flex items-center gap-2 shrink-0">
-            <button 
-              onClick={handleResetAll}
-              className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
-              title="초기화"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              초기화
-            </button>
-            <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
-              title="설정"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <button 
-              onClick={handleAddConsultation}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              신규 문의
-            </button>
+            {page === 'students' ? (
+              <>
+                <button onClick={handleResetAll} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm" title="초기화">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  초기화
+                </button>
+                <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm" title="설정">
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button onClick={handleAddConsultation} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">
+                  <Plus className="w-4 h-4" />
+                  신규 문의
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => { setClassSearch(''); setTeacherFilter('all'); }}
+                className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
+                title="검색·필터 초기화"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                초기화
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="flex-1 overflow-hidden p-4 flex flex-col gap-4">
-        
+
+        {page === 'classes' && (
+          <ClassBoard searchTerm={classSearch} teacherFilter={teacherFilter} />
+        )}
+
+        {page === 'students' && <>
         {/* Summary Cards */}
         <div className="flex flex-col gap-2 shrink-0">
           <div className="flex items-center gap-2">
@@ -423,6 +485,7 @@ export default function App() {
             <span>데이터는 브라우저 메모리에 임시 저장됩니다.</span>
           </div>
         </div>
+        </>}
       </main>
 
       {/* Settings Modal */}
