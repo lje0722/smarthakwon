@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Consultation, ENROLLED_STATUS, getStatusStyle } from '../types';
-import { Edit2, Save, X, GraduationCap } from 'lucide-react';
+import { Consultation, ENROLLED_STATUS, GRADE_OPTIONS, getStatusStyle } from '../types';
+import { X, GraduationCap } from 'lucide-react';
+import { DatePickerCell } from './DatePickerCell';
 
 interface EditableRowProps {
   data: Consultation;
@@ -12,55 +13,75 @@ interface EditableRowProps {
   isStudentView?: boolean;
   nextStudentNumber?: string;
   displayStudentNumber?: (s?: string) => string;
+  onDelete?: (id: string) => void;
 }
 
-export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOptions, classOptions, schoolOptions, gradeOptions, isStudentView = false, nextStudentNumber = '', displayStudentNumber }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<Consultation>(data);
-  const [newNote, setNewNote] = useState('');
-  const [newMethod, setNewMethod] = useState('일반 전화');
+const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+};
+
+export const EditableRow: React.FC<EditableRowProps> = ({
+  data,
+  onSave,
+  statusOptions,
+  classOptions,
+  schoolOptions,
+  gradeOptions,
+  isStudentView = false,
+  nextStudentNumber = '',
+  displayStudentNumber,
+  onDelete,
+}) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalNewNote, setModalNewNote] = useState('');
   const [modalNewMethod, setModalNewMethod] = useState('일반 전화');
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // 원생 전환 팝업
   const [showConvert, setShowConvert] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [convertForm, setConvertForm] = useState({ studentNumber: '', studentPhone: '', parentPhone: '', email: '' });
 
   const [inlineName, setInlineName] = useState(data.name);
   useEffect(() => { setInlineName(data.name); }, [data.name]);
 
-  const handleInlineNameBlur = () => {
-    if (inlineName !== data.name && inlineName.trim() !== '') {
-      onSave({ ...data, name: inlineName.trim() });
-    } else {
-      setInlineName(data.name);
-    }
-  };
-
   const [inlineMemo, setInlineMemo] = useState(data.memo || '');
   useEffect(() => { setInlineMemo(data.memo || ''); }, [data.memo]);
-  const handleInlineMemoBlur = () => {
-    if (inlineMemo !== (data.memo || '')) onSave({ ...data, memo: inlineMemo });
-  };
 
-  // 학생 전화번호 인라인 (원생 뷰)
   const [inlinePhone, setInlinePhone] = useState(data.studentPhone || '');
   useEffect(() => { setInlinePhone(data.studentPhone || ''); }, [data.studentPhone]);
-  const handlePhoneBlur = () => {
-    if (inlinePhone !== (data.studentPhone || '')) onSave({ ...data, studentPhone: inlinePhone.trim() });
+
+  const [inlineProfile, setInlineProfile] = useState(data.profile || '');
+  useEffect(() => { setInlineProfile(data.profile || ''); }, [data.profile]);
+
+  useEffect(() => {
+    if (!isModalOpen && !showConvert && !showDelete) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsModalOpen(false);
+        setShowConvert(false);
+        setShowDelete(false);
+      }
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [isModalOpen, showConvert, showDelete]);
+
+  const selectableStatuses = statusOptions.filter(status => status !== ENROLLED_STATUS);
+  const gradeSelectOptions = [...new Set([...GRADE_OPTIONS, ...gradeOptions])];
+
+  const openConvert = () => {
+    setConvertForm({
+      studentNumber: data.studentNumber || nextStudentNumber,
+      studentPhone: data.studentPhone || '',
+      parentPhone: data.parentPhone || '',
+      email: data.email || '',
+    });
+    setShowConvert(true);
   };
 
   const handleStatusSelect = (newStatus: string) => {
     if (newStatus === ENROLLED_STATUS && data.status !== ENROLLED_STATUS) {
-      setConvertForm({
-        studentNumber: data.studentNumber || nextStudentNumber,
-        studentPhone: data.studentPhone || '',
-        parentPhone: data.parentPhone || '',
-        email: data.email || '',
-      });
-      setShowConvert(true);
+      openConvert();
     } else {
       onSave({ ...data, status: newStatus });
     }
@@ -78,16 +99,6 @@ export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOp
     setShowConvert(false);
   };
 
-  const handleSave = () => {
-    let finalNotes = [...editData.notes];
-    if (newNote.trim()) {
-      finalNotes.push({ date: new Date().toISOString().split('T')[0], method: newMethod, content: newNote.trim() });
-    }
-    onSave({ ...editData, notes: finalNotes });
-    setIsEditing(false);
-    setNewNote('');
-  };
-
   const handleAddNoteFromModal = () => {
     const updatedNotes = [...data.notes, { date: newDate, method: modalNewMethod, content: modalNewNote }];
     onSave({ ...data, notes: updatedNotes });
@@ -95,27 +106,13 @@ export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOp
     setNewDate(new Date().toISOString().split('T')[0]);
   };
 
-  const handleCancel = () => {
-    setEditData(data);
-    setIsEditing(false);
-    setNewNote('');
-  };
-
-  const handleChange = (field: keyof Consultation, value: string) => {
-    setEditData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const cellClass = "px-2 py-2 text-sm text-gray-700 border-b border-gray-100 align-top";
-  const inputClass = "w-full border border-blue-400 rounded px-2 py-1 text-sm bg-blue-50/30 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors";
-  const selectInlineClass = "w-full bg-transparent border border-transparent hover:border-gray-300 focus:border-blue-500 rounded px-1 py-0.5 text-sm outline-none transition-colors appearance-none cursor-pointer";
-  const inlineTextClass = "w-full bg-transparent border border-transparent hover:border-gray-300 focus:bg-white focus:border-blue-500 rounded px-1 py-0.5 text-sm outline-none transition-colors";
-
-  const latestNote = data.notes.length > 0 ? data.notes[data.notes.length - 1] : null;
+  const cellClass = 'px-2 py-1.5 text-sm text-gray-700 border-b border-gray-100 align-middle text-center';
+  const fieldClass = 'w-full h-8 px-1.5 text-sm text-center bg-transparent border border-transparent hover:border-gray-300 hover:bg-white focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded outline-none transition-colors cursor-text';
+  const selectClass = 'w-full h-8 px-1.5 text-sm text-center bg-transparent border border-transparent hover:border-gray-300 hover:bg-white focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded outline-none transition-colors appearance-none cursor-pointer';
 
   return (
     <>
-      <tr className="hover:bg-gray-50 group transition-colors">
-        {/* 1열: 원생뷰=학생번호, 그 외=최초 문의 날짜 */}
+      <tr className="group hover:bg-gray-50/80 transition-colors">
         <td className={cellClass}>
           {isStudentView ? (
             <span
@@ -124,157 +121,177 @@ export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOp
             >
               {displayStudentNumber ? displayStudentNumber(data.studentNumber) : (data.studentNumber || '')}
             </span>
-          ) : isEditing ? (
-            <input type="date" value={editData.date} onChange={(e) => handleChange('date', e.target.value)} className={inputClass} />
           ) : (
-            <span className="whitespace-nowrap">{data.date}</span>
+            <DatePickerCell value={data.date} onChange={(next) => onSave({ ...data, date: next })} />
           )}
         </td>
 
         <td className={`${cellClass} font-medium`}>
-          {isEditing ? (
-            <input type="text" value={editData.name} onChange={(e) => handleChange('name', e.target.value)} className={inputClass} />
-          ) : (
-            <input
-              type="text"
-              value={inlineName}
-              onChange={(e) => setInlineName(e.target.value)}
-              onBlur={handleInlineNameBlur}
-              className="w-full bg-transparent border border-transparent hover:border-gray-300 focus:bg-white focus:border-blue-500 rounded px-1 py-0.5 text-sm outline-none transition-colors font-semibold text-gray-900 cursor-text"
-              placeholder="이름 입력..."
-            />
-          )}
+          <input
+            type="text"
+            value={inlineName}
+            onChange={(e) => setInlineName(e.target.value)}
+            onBlur={() => {
+              if (inlineName !== data.name) onSave({ ...data, name: inlineName.trim() });
+            }}
+            onKeyDown={blurOnEnter}
+            className={`${fieldClass} font-semibold text-gray-900`}
+          />
         </td>
 
         <td className={cellClass}>
-          {isEditing ? (
-            <input type="text" value={editData.memo || ''} onChange={(e) => handleChange('memo', e.target.value)} className={inputClass} placeholder="특이사항..." />
-          ) : (
-            <input
-              type="text"
-              value={inlineMemo}
-              onChange={(e) => setInlineMemo(e.target.value)}
-              onBlur={handleInlineMemoBlur}
-              className={inlineTextClass}
-              placeholder="클릭하여 입력..."
-            />
-          )}
+          <input
+            type="text"
+            value={inlineMemo}
+            maxLength={18}
+            onChange={(e) => setInlineMemo(e.target.value)}
+            onBlur={() => {
+              if (inlineMemo !== (data.memo || '')) onSave({ ...data, memo: inlineMemo.trim() });
+            }}
+            onKeyDown={blurOnEnter}
+            title={inlineMemo}
+            className="w-[132px] h-8 px-2 text-[13px] font-medium text-center text-gray-800 bg-stone-100 border border-stone-200 hover:border-stone-300 focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded outline-none transition-colors mx-auto"
+          />
         </td>
 
         <td className={cellClass}>
-          {isEditing ? (
-            <input type="text" value={editData.school} onChange={(e) => handleChange('school', e.target.value)} className={inputClass} />
-          ) : (
-            <select value={data.school} onChange={(e) => onSave({ ...data, school: e.target.value })} className={selectInlineClass}>
-              {!schoolOptions.includes(data.school) && <option value={data.school}>{data.school}</option>}
-              {schoolOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          )}
+          <select
+            value={data.school}
+            onChange={(e) => onSave({ ...data, school: e.target.value })}
+            className={selectClass}
+            style={{ textAlignLast: 'center' }}
+          >
+            {!data.school && <option value="">-</option>}
+            {!schoolOptions.includes(data.school) && data.school && <option value={data.school}>{data.school}</option>}
+            {schoolOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
         </td>
 
         <td className={cellClass}>
-          {isEditing ? (
-            <input type="text" value={editData.grade} onChange={(e) => handleChange('grade', e.target.value)} className={inputClass} />
-          ) : (
-            <select value={data.grade} onChange={(e) => onSave({ ...data, grade: e.target.value })} className={selectInlineClass}>
-              {!gradeOptions.includes(data.grade) && <option value={data.grade}>{data.grade}</option>}
-              {gradeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          )}
+          <select
+            value={data.grade}
+            onChange={(e) => onSave({ ...data, grade: e.target.value })}
+            className={`${selectClass} font-medium`}
+            style={{ textAlignLast: 'center' }}
+          >
+            {!data.grade && <option value="">-</option>}
+            {!gradeSelectOptions.includes(data.grade) && data.grade && <option value={data.grade}>{data.grade}</option>}
+            {gradeSelectOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
         </td>
 
-        {/* 6열: 원생뷰=학생 전화번호, 그 외=Status */}
-        <td className={cellClass}>
-          {isStudentView ? (
+        {isStudentView ? (
+          <td className={cellClass}>
             <input
               type="text"
               value={inlinePhone}
               onChange={(e) => setInlinePhone(e.target.value)}
-              onBlur={handlePhoneBlur}
-              className={`${inlineTextClass} font-mono text-[13px]`}
-              placeholder="전화번호..."
-            />
-          ) : isEditing ? (
-            <select value={editData.status} onChange={(e) => handleChange('status', e.target.value)} className={`${inputClass} max-w-[180px]`}>
-              {statusOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          ) : (
-            <select
-              value={data.status}
-              onChange={(e) => handleStatusSelect(e.target.value)}
-              className={`px-2 py-1 text-[11px] font-semibold rounded-full border cursor-pointer outline-none appearance-none pr-5 w-full text-center bg-no-repeat ${getStatusStyle(data.status).badge}`}
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                backgroundPosition: `right 0.3rem center`,
-                backgroundSize: `0.75rem 0.75rem`,
-                textAlignLast: 'center',
+              onBlur={() => {
+                if (inlinePhone !== (data.studentPhone || '')) onSave({ ...data, studentPhone: inlinePhone.trim() });
               }}
-              title={data.status}
+              onKeyDown={blurOnEnter}
+              className={`${fieldClass} font-mono text-[13px]`}
+            />
+          </td>
+        ) : (
+          <td className={cellClass}>
+            <select
+              value={data.evalGrade || ''}
+              onChange={(e) => onSave({ ...data, evalGrade: e.target.value })}
+              className={`${selectClass} font-medium`}
+              style={{ textAlignLast: 'center' }}
             >
-              {!statusOptions.includes(data.status) && <option value={data.status}>{data.status}</option>}
-              {statusOptions.map(opt => <option key={opt} value={opt} className="bg-white text-gray-900">{opt}</option>)}
+              <option value="">-</option>
+              {data.evalGrade && !gradeSelectOptions.includes(data.evalGrade) && (
+                <option value={data.evalGrade}>{data.evalGrade}</option>
+              )}
+              {gradeSelectOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
             </select>
-          )}
-        </td>
+          </td>
+        )}
 
-        <td className={cellClass}>
-          {isEditing ? (
-            <select value={editData.className} onChange={(e) => handleChange('className', e.target.value)} className={inputClass}>
-              <option value="-">-</option>
-              {classOptions.map(cls => <option key={cls} value={cls}>{cls}</option>)}
-            </select>
-          ) : (
-            <select value={data.className} onChange={(e) => onSave({ ...data, className: e.target.value })} className={selectInlineClass}>
+        {isStudentView ? (
+          <td className={cellClass}>
+            <select
+              value={data.className}
+              onChange={(e) => onSave({ ...data, className: e.target.value })}
+              className={selectClass}
+              style={{ textAlignLast: 'center' }}
+            >
               <option value="-">-</option>
               {!classOptions.includes(data.className) && data.className !== '-' && <option value={data.className}>{data.className}</option>}
               {classOptions.map(cls => <option key={cls} value={cls}>{cls}</option>)}
             </select>
-          )}
-        </td>
+          </td>
+        ) : (
+          <>
+            <td className={cellClass}>
+              <DatePickerCell value={data.testDate} onChange={(next) => onSave({ ...data, testDate: next })} />
+            </td>
+            <td className={cellClass}>
+              <select
+                value={data.className}
+                onChange={(e) => onSave({ ...data, className: e.target.value })}
+                className={`${selectClass} truncate`}
+                style={{ textAlignLast: 'center' }}
+                title={data.className}
+              >
+                <option value="-">-</option>
+                {!classOptions.includes(data.className) && data.className !== '-' && <option value={data.className}>{data.className}</option>}
+                {classOptions.map(cls => <option key={cls} value={cls}>{cls}</option>)}
+              </select>
+            </td>
+            <td className={cellClass}>
+              <select
+                value={data.status}
+                onChange={(e) => handleStatusSelect(e.target.value)}
+                className={`h-8 px-2 text-[11px] font-semibold rounded-full border cursor-pointer outline-none appearance-none w-full text-center ${getStatusStyle(data.status).badge}`}
+                style={{ textAlignLast: 'center' }}
+                title={data.status}
+              >
+                {!selectableStatuses.includes(data.status) && <option value={data.status}>{data.status}</option>}
+                {selectableStatuses.map(opt => <option key={opt} value={opt} className="bg-white text-gray-900">{opt}</option>)}
+              </select>
+            </td>
+          </>
+        )}
 
         <td className={cellClass}>
-          {isEditing ? (
-            <div className="flex flex-col gap-1">
-              <div className="flex gap-1">
-                <select value={newMethod} onChange={e => setNewMethod(e.target.value)} className="border border-gray-300 rounded px-1 py-0.5 text-xs text-gray-600 outline-none focus:ring-1 focus:ring-blue-500">
-                  <option>일반 전화</option>
-                  <option>카카오톡 보이스톡</option>
-                  <option>카카오톡</option>
-                  <option>왓츠앱</option>
-                  <option>직접 방문</option>
-                </select>
-              </div>
-              <textarea placeholder="새 상담내역 추가..." value={newNote} onChange={(e) => setNewNote(e.target.value)} className={`${inputClass} min-h-[40px] resize-y`} rows={2} />
-            </div>
-          ) : (
-            <div className="line-clamp-2 leading-tight text-gray-700 cursor-pointer hover:bg-gray-100 rounded p-1 -m-1 transition-colors" title={latestNote?.content} onClick={() => setIsModalOpen(true)}>
-              {latestNote ? (
-                <>
-                  <span className="font-semibold text-gray-500 mr-1 text-[10px]">[{latestNote.date} | {latestNote.method}]</span>
-                  {latestNote.content}
-                </>
-              ) : (
-                <span className="text-gray-400 italic">상담 내역 없음 (클릭하여 추가)</span>
-              )}
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="inline-flex items-center justify-center h-8 px-3 text-xs font-medium rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors whitespace-nowrap"
+          >
+            상담내역
+          </button>
         </td>
 
-        <td className={`${cellClass} text-right whitespace-nowrap w-[60px]`}>
-          {isEditing ? (
-            <div className="flex justify-end gap-1">
-              <button onClick={handleSave} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="저장"><Save className="w-4 h-4" /></button>
-              <button onClick={handleCancel} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="취소"><X className="w-4 h-4" /></button>
-            </div>
-          ) : (
-            <button onClick={() => setIsEditing(true)} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-opacity" title="수정">
-              <Edit2 className="w-4 h-4" />
-            </button>
-          )}
+        {!isStudentView && (
+          <td className={`${cellClass} whitespace-nowrap`}>
+            {data.status !== ENROLLED_STATUS ? (
+              <button
+                type="button"
+                onClick={openConvert}
+                className="inline-flex items-center justify-center gap-1 h-8 px-2.5 text-xs font-medium rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors"
+              >
+                <GraduationCap className="w-3.5 h-3.5" />
+                원생 등록
+              </button>
+            ) : null}
+          </td>
+        )}
+        <td className={`${cellClass} w-[40px]`}>
+          <button
+            type="button"
+            onClick={() => setShowDelete(true)}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            title="학생 삭제"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </td>
       </tr>
 
-      {/* 상담 이력 모달 */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
@@ -282,11 +299,25 @@ export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOp
               <h2 className="text-lg font-bold text-gray-900">{data.name} 학생 상담 이력</h2>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-500 hover:text-gray-700"><X className="w-5 h-5" /></button>
             </div>
+            <div className="p-4 border-b border-gray-200">
+              <label className="block text-sm font-semibold text-gray-800 mb-1">학생 특징 / 상담 요약</label>
+              <p className="text-xs text-gray-500 mb-2">최근 특이사항이나 이전 상담 결과를 적어 두면, 상담내역을 모두 읽지 않아도 됩니다.</p>
+              <textarea
+                value={inlineProfile}
+                onChange={(e) => setInlineProfile(e.target.value)}
+                onBlur={() => {
+                  if (inlineProfile !== (data.profile || '')) onSave({ ...data, profile: inlineProfile });
+                }}
+                className="w-full min-h-[120px] border border-amber-200 bg-amber-50/60 rounded-lg p-3 text-sm text-gray-800 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:bg-white resize-y leading-relaxed"
+              />
+            </div>
             <div className="p-4 border-b border-gray-200 bg-blue-50/50">
               <h3 className="text-sm font-semibold text-blue-900 mb-2">새로운 상담 기록 추가</h3>
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2">
-                  <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm bg-white" />
+                  <div className="w-[120px] border border-gray-300 rounded bg-white">
+                    <DatePickerCell value={newDate} onChange={setNewDate} />
+                  </div>
                   <select value={modalNewMethod} onChange={e => setModalNewMethod(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 outline-none focus:ring-1 focus:ring-blue-500">
                     <option>일반 전화</option>
                     <option>카카오톡 보이스톡</option>
@@ -319,7 +350,6 @@ export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOp
         </div>
       )}
 
-      {/* 원생 전환 팝업 */}
       {showConvert && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md flex flex-col">
@@ -352,6 +382,32 @@ export const EditableRow: React.FC<EditableRowProps> = ({ data, onSave, statusOp
             <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-lg">
               <button onClick={() => setShowConvert(false)} className="px-4 py-1.5 rounded text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors">취소</button>
               <button onClick={confirmConvert} className="px-4 py-1.5 rounded text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 transition-colors">원생으로 등록</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col">
+            <div className="p-4 border-b border-gray-200 bg-red-50 rounded-t-lg">
+              <h2 className="text-base font-bold text-red-800">학생 삭제</h2>
+            </div>
+            <div className="p-4 text-sm text-gray-700 leading-relaxed">
+              <span className="font-semibold text-gray-900">{data.name || '이 학생'}</span>을(를) 삭제하시겠습니까?
+              <br />삭제하면 목록에서 사라지며, 되돌릴 수 없습니다.
+            </div>
+            <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-lg">
+              <button onClick={() => setShowDelete(false)} className="px-4 py-1.5 rounded text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors">취소</button>
+              <button
+                onClick={() => {
+                  onDelete?.(data.id);
+                  setShowDelete(false);
+                }}
+                className="px-4 py-1.5 rounded text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                삭제
+              </button>
             </div>
           </div>
         </div>

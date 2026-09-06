@@ -1,20 +1,21 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { initialData } from './data';
-import { Consultation, SortField, SortOrder, DEFAULT_STATUS_OPTIONS, ENROLLED_STATUS, getStatusStyle } from './types';
+import { Consultation, SortField, SortOrder, DEFAULT_STATUS_OPTIONS, ENROLLED_STATUS, INQUIRY_STATUS, GRADE_OPTIONS, getStatusStyle, migrateStatus, parseDateValue, normalizeDateInput } from './types';
 import { EditableRow } from './components/EditableRow';
 import { EditableListItem } from './components/EditableListItem';
 import { ClassBoard } from './components/ClassBoard';
+import { ColumnFilterHeader } from './components/ColumnFilterHeader';
 import { TEACHER_ORDER } from './classData';
 import { Search, Plus, ArrowUpDown, ChevronDown, ChevronUp, RotateCcw, Settings, X } from 'lucide-react';
 
 // 요약 카드 및 좁은 화면용 짧은 라벨
 const STATUS_SHORT_LABEL: Record<string, string> = {
-  '초기 문의': '초기 문의',
-  '레벨테스트 완료 (등록 여부 미정)': '레벨테스트 완료',
-  '반 배정 완료 (등록 대기)': '반배정 완료',
-  '신규 반 개설 대기': '신규 반 대기',
-  '기존 반 대기 (정원 초과)': '기존 반 대기',
-  '등록 취소/보류': '등록 취소/보류',
+  '문의': '문의',
+  '테스트 대기': '테스트 대기',
+  '채점대기': '채점대기',
+  '상담대기': '상담대기',
+  '보류': '보류',
+  '반 대기': '반 대기',
   '원생 (등록완료)': '원생',
 };
 
@@ -60,7 +61,13 @@ const getNextStudentNumber = (data: Consultation[]): string => {
 
 export default function App() {
   const [data, setData] = useState<Consultation[]>(
-    [...initialData].sort((a, b) => b.date.localeCompare(a.date))
+    [...initialData]
+      .map((item) => ({
+        ...item,
+        status: migrateStatus(item.status),
+        date: normalizeDateInput(item.date),
+      }))
+      .sort((a, b) => parseDateValue(b.date) - parseDateValue(a.date))
   );
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(true);
   const [statusOptions, setStatusOptions] = useState<string[]>(DEFAULT_STATUS_OPTIONS);
@@ -88,26 +95,83 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsNewStatus, setSettingsNewStatus] = useState('');
   const [settingsNewClass, setSettingsNewClass] = useState('');
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsSettingsOpen(false);
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [isSettingsOpen]);
   
   // Filters and Sorting
   const [activeTab, setActiveTab] = useState<'all' | '원생' | '예비원생'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [gradeFilter, setGradeFilter] = useState<string>('all');
-  const [classFilter, setClassFilter] = useState<string>('all');
+  const [columnFilters, setColumnFilters] = useState<{
+    school: string[] | null;
+    grade: string[] | null;
+    evalGrade: string[] | null;
+    className: string[] | null;
+    status: string[] | null;
+  }>({ school: null, grade: null, evalGrade: null, className: null, status: null });
+  const [openColumnFilter, setOpenColumnFilter] = useState<keyof typeof columnFilters | null>(null);
   
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   // Derived options for filters
   const schools = useMemo(() => Array.from(new Set(data.map(d => d.school))).filter(Boolean).sort(), [data]);
-  const grades = useMemo(() => sortByGradeDesc([...new Set(data.map(d => d.grade))].filter((g): g is string => Boolean(g))), [data]);
+  const grades = useMemo(
+    () => sortByGradeDesc([...new Set([...GRADE_OPTIONS, ...data.map(d => d.grade), ...data.map(d => d.evalGrade || '')])].filter(Boolean)),
+    [data]
+  );
   const [classOptions, setClassOptions] = useState<string[]>([]);
   React.useEffect(() => {
     if (classOptions.length === 0 && data.length > 0) {
       setClassOptions(sortByGradeDesc([...new Set(data.map(d => d.className))].filter((c): c is string => Boolean(c) && c !== '-')));
     }
   }, [data]);
+
+  const tabData = useMemo(() => {
+    if (activeTab === '원생') return data.filter(item => item.status === ENROLLED_STATUS);
+    if (activeTab === '예비원생') return data.filter(item => item.status !== ENROLLED_STATUS);
+    return data;
+  }, [data, activeTab]);
+
+  const schoolChoices = useMemo(
+    () => Array.from(new Set(tabData.map(d => d.school).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
+    [tabData]
+  );
+  const gradeChoices = useMemo(
+    () => sortByGradeDesc([...new Set(tabData.map(d => d.grade).filter(Boolean))]),
+    [tabData]
+  );
+  const evalGradeChoices = useMemo(
+    () => {
+      const vals = tabData.map(d => d.evalGrade || '-');
+      return sortByGradeDesc([...new Set(vals)]);
+    },
+    [tabData]
+  );
+  const classChoices = useMemo(
+    () => sortByGradeDesc([...new Set(tabData.map(d => d.className || '-'))]),
+    [tabData]
+  );
+  const statusChoices = useMemo(
+    () => (activeTab === '예비원생' ? statusOptions.filter(s => s !== ENROLLED_STATUS) : statusOptions)
+      .filter(status => tabData.some(d => d.status === status)),
+    [activeTab, statusOptions, tabData]
+  );
+
+  const applyColumnFilter = (key: keyof typeof columnFilters, next: string[] | null) => {
+    setColumnFilters(prev => ({ ...prev, [key]: next }));
+    if (next && next.length > 0) {
+      setSortField(key);
+      setSortOrder('asc');
+    }
+  };
 
   // 원생 등록용 다음 학생번호 (최대 번호 + 1)
   const nextStudentNumber = useMemo(() => getNextStudentNumber(data), [data]);
@@ -125,6 +189,14 @@ export default function App() {
     });
     return counts;
   }, [data, statusOptions]);
+
+  // 예비원생 탭에서는 원생 카운트 카드를 보여주지 않는다
+  const visibleSummaryStatuses = useMemo(
+    () => activeTab === '예비원생'
+      ? statusOptions.filter(status => status !== ENROLLED_STATUS)
+      : statusOptions,
+    [activeTab, statusOptions]
+  );
 
   // Filtered and sorted data
   const processedData = useMemo(() => {
@@ -149,25 +221,64 @@ export default function App() {
     if (statusFilter !== 'all') {
       result = result.filter(item => item.status === statusFilter);
     }
-    if (gradeFilter !== 'all') {
-      result = result.filter(item => item.grade === gradeFilter);
+    if (columnFilters.school) {
+      result = result.filter(item => columnFilters.school!.includes(item.school));
     }
-    if (classFilter !== 'all') {
-      result = result.filter(item => item.className === classFilter);
+    if (columnFilters.grade) {
+      result = result.filter(item => columnFilters.grade!.includes(item.grade));
+    }
+    if (columnFilters.evalGrade) {
+      result = result.filter(item => columnFilters.evalGrade!.includes(item.evalGrade || '-'));
+    }
+    if (columnFilters.className) {
+      result = result.filter(item => columnFilters.className!.includes(item.className || '-'));
+    }
+    if (columnFilters.status) {
+      result = result.filter(item => columnFilters.status!.includes(item.status));
     }
 
     // Apply Sorting
     const dir = sortOrder === 'asc' ? 1 : -1;
+    const compareGrade = (left?: string, right?: string) => {
+      const ga = gradeNum(left || '');
+      const gb = gradeNum(right || '');
+      if (ga === -1 && gb === -1) return 0;
+      if (ga === -1) return 1;
+      if (gb === -1) return -1;
+      return (ga - gb) * dir;
+    };
     result.sort((a, b) => {
-      // 학생번호: 뒤 숫자 기준 숫자 정렬
+      if (sortField === 'date') {
+        return (parseDateValue(a.date) - parseDateValue(b.date)) * dir;
+      }
+      if (sortField === 'testDate') {
+        return (parseDateValue(a.testDate) - parseDateValue(b.testDate)) * dir;
+      }
       if (sortField === 'studentNumber') {
         return (studentNumTrailing(a.studentNumber) - studentNumTrailing(b.studentNumber)) * dir;
       }
-      // 반: 학년(G숫자) 기준 정렬 후 이름
+      if (sortField === 'school') {
+        return (a.school || '').localeCompare(b.school || '', 'ko') * dir;
+      }
+      if (sortField === 'grade') {
+        return compareGrade(a.grade, b.grade);
+      }
+      if (sortField === 'evalGrade') {
+        return compareGrade(a.evalGrade, b.evalGrade);
+      }
       if (sortField === 'className') {
-        const g = gradeNum(a.className) - gradeNum(b.className);
-        if (g !== 0) return g * dir;
-        return a.className.localeCompare(b.className) * dir;
+        const g = compareGrade(a.className, b.className);
+        if (g !== 0) return g;
+        return (a.className || '').localeCompare(b.className || '', 'ko') * dir;
+      }
+      if (sortField === 'status') {
+        const rank = (status: string) => {
+          const i = statusOptions.indexOf(status);
+          return i === -1 ? statusOptions.length : i;
+        };
+        const r = rank(a.status) - rank(b.status);
+        if (r !== 0) return r * dir;
+        return (a.status || '').localeCompare(b.status || '', 'ko') * dir;
       }
       const valA = a[sortField] || '';
       const valB = b[sortField] || '';
@@ -177,18 +288,7 @@ export default function App() {
     });
 
     return result;
-  }, [data, searchTerm, statusFilter, gradeFilter, classFilter, sortField, sortOrder, activeTab]);
-
-  // 원생 탭 진입 시 학생번호 오름차순으로 기본 정렬, 나올 때 날짜 내림차순 복귀
-  React.useEffect(() => {
-    if (activeTab === '원생') {
-      setSortField('studentNumber');
-      setSortOrder('asc');
-    } else {
-      setSortField('date');
-      setSortOrder('desc');
-    }
-  }, [activeTab]);
+  }, [data, searchTerm, statusFilter, columnFilters, sortField, sortOrder, activeTab, statusOptions]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -202,8 +302,8 @@ export default function App() {
   const handleResetAll = () => {
     setSearchTerm('');
     setStatusFilter('all');
-    setGradeFilter('all');
-    setClassFilter('all');
+    setColumnFilters({ school: null, grade: null, evalGrade: null, className: null, status: null });
+    setOpenColumnFilter(null);
     setSortField('date');
     setSortOrder('desc');
   };
@@ -228,6 +328,10 @@ export default function App() {
     setData(prev => prev.map(row => row.id === updatedRow.id ? updatedRow : row));
   };
 
+  const handleDeleteRow = (id: string) => {
+    setData(prev => prev.filter(row => row.id !== id));
+  };
+
   const handleAddConsultation = () => {
     const newId = (Math.max(...data.map(d => parseInt(d.id) || 0)) + 1).toString();
     const newEntry: Consultation = {
@@ -236,8 +340,10 @@ export default function App() {
       name: '',
       school: '',
       grade: '',
-      status: '초기 문의',
+      status: INQUIRY_STATUS,
       className: '-',
+      evalGrade: '',
+      testDate: '',
       notes: []
     };
     setData([newEntry, ...data]);
@@ -299,24 +405,6 @@ export default function App() {
                     className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-64 outline-none"
                   />
                 </div>
-                <select
-                  value={gradeFilter}
-                  onChange={(e) => setGradeFilter(e.target.value)}
-                  className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto text-center font-medium"
-                  style={{ textAlignLast: 'center' }}
-                >
-                  <option value="all">모든 학년</option>
-                  {grades.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                </select>
-                <select
-                  value={classFilter}
-                  onChange={(e) => setClassFilter(e.target.value)}
-                  className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto max-w-[220px] text-center font-medium"
-                  style={{ textAlignLast: 'center' }}
-                >
-                  <option value="all">모든 반</option>
-                  {classOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                </select>
               </>
             ) : (
               <>
@@ -395,8 +483,8 @@ export default function App() {
              </button>
           </div>
           {isSummaryExpanded && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-              {statusOptions.map((status) => (
+            <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 ${visibleSummaryStatuses.length === 6 ? 'lg:grid-cols-6' : 'lg:grid-cols-7'}`}>
+              {visibleSummaryStatuses.map((status) => (
                 <div
                   key={status}
                   className={`rounded-lg border px-3 py-2 flex flex-col justify-center cursor-pointer hover:shadow-sm transition-shadow ${getStatusStyle(status).card} ${statusFilter === status ? 'ring-2 ring-offset-1 ring-blue-400' : ''}`}
@@ -413,66 +501,129 @@ export default function App() {
         {/* Data Table */}
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col">
           <div className="overflow-auto flex-1">
-            <table className="w-full text-left border-collapse min-w-[800px]">
+            <table className="w-full text-center border-collapse table-fixed min-w-[1140px]">
               <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 sticky top-0 z-10">
                 <tr>
                   {isStudentView ? (
-                    <th 
-                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[90px]"
+                    <th
+                      className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[90px]"
                       onClick={() => handleSort('studentNumber')}
                     >
-                      <div className="flex items-center gap-1">학생번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      <div className="flex items-center justify-center gap-1">학생번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                     </th>
                   ) : (
-                    <th 
-                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[100px]"
+                    <th
+                      className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[110px]"
                       onClick={() => handleSort('date')}
                     >
-                      <div className="flex items-center gap-1">최초 문의 날짜 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      <div className="flex items-center justify-center gap-1">문의 날짜 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                     </th>
                   )}
-                  <th 
-                    className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors min-w-[140px]"
+                  <th
+                    className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[140px]"
                     onClick={() => handleSort('name')}
                   >
-                    <div className="flex items-center gap-1">이름 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    <div className="flex items-center justify-center gap-1">이름 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                   </th>
-                  <th className="px-2 py-2 whitespace-nowrap w-[120px]">Note</th>
-                  <th className="px-2 py-2 whitespace-nowrap w-[140px]">학교</th>
-                  <th className="px-2 py-2 whitespace-nowrap w-[60px]">학년</th>
+                  <th className="px-2 py-2.5 whitespace-nowrap w-[140px]">특이사항</th>
+                  <th className="px-1 py-2.5 whitespace-nowrap w-[110px]">
+                    <ColumnFilterHeader
+                      label="학교"
+                      options={schoolChoices}
+                      selected={columnFilters.school}
+                      isOpen={openColumnFilter === 'school'}
+                      onToggle={() => setOpenColumnFilter(openColumnFilter === 'school' ? null : 'school')}
+                      onClose={() => setOpenColumnFilter(null)}
+                      onChange={(next) => applyColumnFilter('school', next)}
+                    />
+                  </th>
+                  <th className="px-1 py-2.5 whitespace-nowrap w-[80px]">
+                    <ColumnFilterHeader
+                      label="학년"
+                      options={gradeChoices}
+                      selected={columnFilters.grade}
+                      isOpen={openColumnFilter === 'grade'}
+                      onToggle={() => setOpenColumnFilter(openColumnFilter === 'grade' ? null : 'grade')}
+                      onClose={() => setOpenColumnFilter(null)}
+                      onChange={(next) => applyColumnFilter('grade', next)}
+                    />
+                  </th>
                   {isStudentView ? (
-                    <th 
-                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[140px]"
+                    <th
+                      className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[140px]"
                       onClick={() => handleSort('studentPhone')}
                     >
-                      <div className="flex items-center gap-1">학생 전화번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      <div className="flex items-center justify-center gap-1">학생 전화번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                     </th>
                   ) : (
-                    <th 
-                      className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[180px]"
-                      onClick={() => handleSort('status')}
-                    >
-                      <div className="flex items-center gap-1 flex-1 justify-center">Status <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    <>
+                      <th className="px-1 py-2.5 whitespace-nowrap w-[88px]">
+                        <ColumnFilterHeader
+                          label="평가학년"
+                          options={evalGradeChoices}
+                          selected={columnFilters.evalGrade}
+                          isOpen={openColumnFilter === 'evalGrade'}
+                          onToggle={() => setOpenColumnFilter(openColumnFilter === 'evalGrade' ? null : 'evalGrade')}
+                          onClose={() => setOpenColumnFilter(null)}
+                          onChange={(next) => applyColumnFilter('evalGrade', next)}
+                        />
+                      </th>
+                      <th
+                        className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[110px]"
+                        onClick={() => handleSort('testDate')}
+                      >
+                        <div className="flex items-center justify-center gap-1">테스트일 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      </th>
+                      <th className="px-1 py-2.5 whitespace-nowrap w-[150px]">
+                        <ColumnFilterHeader
+                          label="추천 반"
+                          options={classChoices}
+                          selected={columnFilters.className}
+                          isOpen={openColumnFilter === 'className'}
+                          onToggle={() => setOpenColumnFilter(openColumnFilter === 'className' ? null : 'className')}
+                          onClose={() => setOpenColumnFilter(null)}
+                          onChange={(next) => applyColumnFilter('className', next)}
+                        />
+                      </th>
+                      <th className="px-1 py-2.5 whitespace-nowrap w-[108px]">
+                        <ColumnFilterHeader
+                          label="Status"
+                          options={statusChoices}
+                          selected={columnFilters.status}
+                          isOpen={openColumnFilter === 'status'}
+                          onToggle={() => setOpenColumnFilter(openColumnFilter === 'status' ? null : 'status')}
+                          onClose={() => setOpenColumnFilter(null)}
+                          onChange={(next) => applyColumnFilter('status', next)}
+                        />
+                      </th>
+                    </>
+                  )}
+                  {isStudentView && (
+                    <th className="px-1 py-2.5 whitespace-nowrap w-[140px]">
+                      <ColumnFilterHeader
+                        label="반"
+                        options={classChoices}
+                        selected={columnFilters.className}
+                        isOpen={openColumnFilter === 'className'}
+                        onToggle={() => setOpenColumnFilter(openColumnFilter === 'className' ? null : 'className')}
+                        onClose={() => setOpenColumnFilter(null)}
+                        onChange={(next) => applyColumnFilter('className', next)}
+                      />
                     </th>
                   )}
-                  <th 
-                    className="px-2 py-2 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors whitespace-nowrap w-[120px]"
-                    onClick={() => handleSort('className')}
-                  >
-                    <div className="flex items-center gap-1">반 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
-                  </th>
-                  <th className="px-2 py-2 whitespace-nowrap min-w-[200px]">상담내역</th>
-                  <th className="px-2 py-2 whitespace-nowrap w-[60px]"></th>
+                  <th className="px-2 py-2.5 whitespace-nowrap w-[88px]">상담내역</th>
+                  {!isStudentView && <th className="px-2 py-2.5 whitespace-nowrap w-[104px]"></th>}
+                  <th className="px-2 py-2.5 whitespace-nowrap w-[40px]"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {processedData.length > 0 ? (
                   processedData.map((row) => (
-                    <EditableRow key={row.id} data={row} onSave={handleSaveRow} statusOptions={statusOptions} classOptions={classOptions} schoolOptions={schools} gradeOptions={grades} isStudentView={isStudentView} nextStudentNumber={nextStudentNumber} displayStudentNumber={shortStudentNum} />
+                    <EditableRow key={row.id} data={row} onSave={handleSaveRow} onDelete={handleDeleteRow} statusOptions={statusOptions} classOptions={classOptions} schoolOptions={schools} gradeOptions={grades} isStudentView={isStudentView} nextStudentNumber={nextStudentNumber} displayStudentNumber={shortStudentNum} />
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500 text-sm">
+                    <td colSpan={isStudentView ? 9 : 12} className="px-4 py-8 text-center text-gray-500 text-sm">
                       조건에 맞는 상담 내역이 없습니다.
                     </td>
                   </tr>
