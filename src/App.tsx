@@ -247,6 +247,11 @@ export default function App() {
       if (gb === -1) return -1;
       return (ga - gb) * dir;
     };
+    if (sortField === 'manual') {
+      const index = new Map(data.map((item, i) => [item.id, i]));
+      result.sort((a, b) => (index.get(a.id) ?? 0) - (index.get(b.id) ?? 0));
+      return result;
+    }
     result.sort((a, b) => {
       if (sortField === 'date') {
         return (parseDateValue(a.date) - parseDateValue(b.date)) * dir;
@@ -330,6 +335,30 @@ export default function App() {
 
   const handleDeleteRow = (id: string) => {
     setData(prev => prev.filter(row => row.id !== id));
+  };
+
+  const handleReorderRows = (fromId: string, toId: string, place: 'before' | 'after' = 'before') => {
+    if (!fromId || !toId || fromId === toId) return;
+    const visibleIds = processedData.map(row => row.id);
+    const from = visibleIds.indexOf(fromId);
+    const to = visibleIds.indexOf(toId);
+    if (from < 0 || to < 0) return;
+    const nextVisible = [...visibleIds];
+    const [moved] = nextVisible.splice(from, 1);
+    let insertAt = nextVisible.indexOf(toId);
+    if (insertAt < 0) return;
+    if (place === 'after') insertAt += 1;
+    nextVisible.splice(insertAt, 0, moved);
+    setData(prev => {
+      const byId = new Map(prev.map(row => [row.id, row]));
+      const used = new Set(nextVisible);
+      let i = 0;
+      return prev.map(row => {
+        if (!used.has(row.id)) return row;
+        return byId.get(nextVisible[i++])!;
+      });
+    });
+    setSortField('manual');
   };
 
   const handleAddConsultation = () => {
@@ -501,9 +530,13 @@ export default function App() {
         {/* Data Table */}
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col">
           <div className="overflow-auto flex-1">
-            <table className="w-full text-center border-collapse table-fixed min-w-[1140px]">
+            <table className="w-full text-center border-collapse table-fixed min-w-[1220px]">
+              <colgroup>
+                <col style={{ width: 16 }} />
+              </colgroup>
               <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 sticky top-0 z-10">
                 <tr>
+                  <th className="px-0 py-2.5 w-4 min-w-4 max-w-4"></th>
                   {isStudentView ? (
                     <th
                       className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[90px]"
@@ -525,7 +558,7 @@ export default function App() {
                   >
                     <div className="flex items-center justify-center gap-1">이름 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                   </th>
-                  <th className="px-2 py-2.5 whitespace-nowrap w-[140px]">특이사항</th>
+                  <th className="px-2 py-2.5 whitespace-nowrap w-[200px]">특이사항</th>
                   <th className="px-1 py-2.5 whitespace-nowrap w-[110px]">
                     <ColumnFilterHeader
                       label="학교"
@@ -619,11 +652,11 @@ export default function App() {
               <tbody className="divide-y divide-gray-100">
                 {processedData.length > 0 ? (
                   processedData.map((row) => (
-                    <EditableRow key={row.id} data={row} onSave={handleSaveRow} onDelete={handleDeleteRow} statusOptions={statusOptions} classOptions={classOptions} schoolOptions={schools} gradeOptions={grades} isStudentView={isStudentView} nextStudentNumber={nextStudentNumber} displayStudentNumber={shortStudentNum} />
+                    <EditableRow key={row.id} data={row} onSave={handleSaveRow} onDelete={handleDeleteRow} onReorder={handleReorderRows} statusOptions={statusOptions} classOptions={classOptions} schoolOptions={schools} gradeOptions={grades} isStudentView={isStudentView} nextStudentNumber={nextStudentNumber} displayStudentNumber={shortStudentNum} />
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={isStudentView ? 9 : 12} className="px-4 py-8 text-center text-gray-500 text-sm">
+                    <td colSpan={isStudentView ? 10 : 13} className="px-4 py-8 text-center text-gray-500 text-sm">
                       조건에 맞는 상담 내역이 없습니다.
                     </td>
                   </tr>

@@ -97,7 +97,7 @@ export interface Consultation {
   email?: string;
 }
 
-export type SortField = 'date' | 'name' | 'school' | 'grade' | 'status' | 'className' | 'evalGrade' | 'testDate' | 'studentNumber' | 'studentPhone';
+export type SortField = 'date' | 'name' | 'school' | 'grade' | 'status' | 'className' | 'evalGrade' | 'testDate' | 'studentNumber' | 'studentPhone' | 'manual';
 export type SortOrder = 'asc' | 'desc';
 
 const MONTH_NAME: Record<string, number> = {

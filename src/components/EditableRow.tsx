@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Consultation, ENROLLED_STATUS, GRADE_OPTIONS, getStatusStyle } from '../types';
 import { X, GraduationCap } from 'lucide-react';
 import { DatePickerCell } from './DatePickerCell';
@@ -14,6 +15,7 @@ interface EditableRowProps {
   nextStudentNumber?: string;
   displayStudentNumber?: (s?: string) => string;
   onDelete?: (id: string) => void;
+  onReorder?: (fromId: string, toId: string, place: 'before' | 'after') => void;
 }
 
 const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -31,6 +33,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   nextStudentNumber = '',
   displayStudentNumber,
   onDelete,
+  onReorder,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalNewNote, setModalNewNote] = useState('');
@@ -46,6 +49,12 @@ export const EditableRow: React.FC<EditableRowProps> = ({
 
   const [inlineMemo, setInlineMemo] = useState(data.memo || '');
   useEffect(() => { setInlineMemo(data.memo || ''); }, [data.memo]);
+  const [memoEditing, setMemoEditing] = useState(false);
+  const [dropEdge, setDropEdge] = useState<'before' | 'after' | null>(null);
+  const [grabbed, setGrabbed] = useState(false);
+  const [memoRect, setMemoRect] = useState<DOMRect | null>(null);
+  const memoAreaRef = useRef<HTMLTextAreaElement>(null);
+  const memoCellRef = useRef<HTMLTableCellElement>(null);
 
   const [inlinePhone, setInlinePhone] = useState(data.studentPhone || '');
   useEffect(() => { setInlinePhone(data.studentPhone || ''); }, [data.studentPhone]);
@@ -54,17 +63,42 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   useEffect(() => { setInlineProfile(data.profile || ''); }, [data.profile]);
 
   useEffect(() => {
-    if (!isModalOpen && !showConvert && !showDelete) return;
+    if (!memoEditing) return;
+    memoAreaRef.current?.focus();
+    const onPointerDown = (event: MouseEvent) => {
+      if (memoAreaRef.current?.contains(event.target as Node)) return;
+      const next = memoAreaRef.current?.value.trim() ?? '';
+      setInlineMemo(next);
+      if (next !== (data.memo || '')) onSave({ ...data, memo: next });
+      setMemoEditing(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [memoEditing, data, onSave]);
+
+  useEffect(() => {
+    if (!grabbed) return;
+    const release = () => setGrabbed(false);
+    window.addEventListener('mouseup', release);
+    return () => window.removeEventListener('mouseup', release);
+  }, [grabbed]);
+
+  useEffect(() => {
+    if (!isModalOpen && !showConvert && !showDelete && !memoEditing) return;
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsModalOpen(false);
         setShowConvert(false);
         setShowDelete(false);
+        if (memoEditing) {
+          setInlineMemo(data.memo || '');
+          setMemoEditing(false);
+        }
       }
     };
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
-  }, [isModalOpen, showConvert, showDelete]);
+  }, [isModalOpen, showConvert, showDelete, memoEditing]);
 
   const selectableStatuses = statusOptions.filter(status => status !== ENROLLED_STATUS);
   const gradeSelectOptions = [...new Set([...GRADE_OPTIONS, ...gradeOptions])];
@@ -112,7 +146,55 @@ export const EditableRow: React.FC<EditableRowProps> = ({
 
   return (
     <>
-      <tr className="group hover:bg-gray-50/80 transition-colors">
+      <tr
+        className={`group hover:bg-gray-50/80 transition-colors ${
+          grabbed ? 'bg-slate-100/80' : ''
+        } ${
+          dropEdge === 'before'
+            ? '[&>td]:shadow-[inset_0_2px_0_0_rgba(147,197,253,0.95)]'
+            : dropEdge === 'after'
+              ? '[&>td]:shadow-[inset_0_-2px_0_0_rgba(147,197,253,0.95)]'
+              : ''
+        }`}
+        onDragOver={(e) => {
+          if (!onReorder) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = e.currentTarget.getBoundingClientRect();
+          setDropEdge(e.clientY < rect.top + rect.height / 2 ? 'before' : 'after');
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropEdge(null);
+        }}
+        onDrop={(e) => {
+          if (!onReorder) return;
+          e.preventDefault();
+          const place = dropEdge ?? 'before';
+          setDropEdge(null);
+          onReorder(e.dataTransfer.getData('text/plain'), data.id, place);
+        }}
+      >
+        <td className={`${cellClass} w-4 min-w-4 max-w-4 px-0 relative`}>
+          <div
+            draggable
+            onMouseDown={() => setGrabbed(true)}
+            onDragStart={(e) => {
+              setGrabbed(true);
+              e.dataTransfer.setData('text/plain', data.id);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragEnd={() => {
+              setGrabbed(false);
+              setDropEdge(null);
+            }}
+            role="button"
+            aria-label="드래그하여 순서 변경"
+            title="드래그하여 순서 변경"
+            className={`absolute inset-0 cursor-grab active:cursor-grabbing ${
+              grabbed ? 'bg-slate-200/70' : 'hover:bg-slate-100/80'
+            }`}
+          />
+        </td>
         <td className={cellClass}>
           {isStudentView ? (
             <span
@@ -139,19 +221,40 @@ export const EditableRow: React.FC<EditableRowProps> = ({
           />
         </td>
 
-        <td className={cellClass}>
-          <input
-            type="text"
-            value={inlineMemo}
-            maxLength={18}
-            onChange={(e) => setInlineMemo(e.target.value)}
-            onBlur={() => {
-              if (inlineMemo !== (data.memo || '')) onSave({ ...data, memo: inlineMemo.trim() });
+        <td ref={memoCellRef} className={`${cellClass} relative`}>
+          <button
+            type="button"
+            onClick={() => {
+              setMemoRect(memoCellRef.current?.getBoundingClientRect() ?? null);
+              setMemoEditing(true);
             }}
-            onKeyDown={blurOnEnter}
             title={inlineMemo}
-            className="w-[132px] h-8 px-2 text-[13px] font-medium text-center text-gray-800 bg-stone-100 border border-stone-200 hover:border-stone-300 focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded outline-none transition-colors mx-auto"
-          />
+            className={`${fieldClass} text-[13px] text-gray-700 truncate`}
+          >
+            {inlineMemo || '\u00a0'}
+          </button>
+          {memoEditing && createPortal(
+            <textarea
+              ref={memoAreaRef}
+              value={inlineMemo}
+              onChange={(e) => setInlineMemo(e.target.value)}
+              onBlur={(e) => {
+                const next = e.target.value.trim();
+                setInlineMemo(next);
+                if (next !== (data.memo || '')) onSave({ ...data, memo: next });
+                setMemoEditing(false);
+              }}
+              style={{
+                position: 'fixed',
+                left: Math.max(8, memoRect?.left ?? 8),
+                top: Math.max(8, memoRect?.top ?? 8),
+                width: Math.max(memoRect?.width ?? 200, 320),
+                zIndex: 80,
+              }}
+              className="min-h-[88px] px-2.5 py-2 text-[13px] text-gray-800 bg-white border border-blue-400 rounded-md shadow-xl outline-none resize-y leading-relaxed"
+            />,
+            document.body
+          )}
         </td>
 
         <td className={cellClass}>

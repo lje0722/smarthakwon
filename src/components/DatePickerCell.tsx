@@ -25,7 +25,7 @@ export const DatePickerCell: React.FC<DatePickerCellProps> = ({ value, onChange 
         onClick={openPicker}
         className="absolute inset-0 flex items-center justify-center font-mono text-[13px] text-gray-800 tabular-nums rounded hover:bg-white hover:border hover:border-gray-300 focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none"
       >
-        {display || <span className="text-gray-300">선택</span>}
+        {display || '\u00a0'}
       </button>
       <input
         ref={ref}
