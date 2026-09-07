@@ -120,6 +120,7 @@ export default function App() {
   
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const ignoreSortUntilRef = useRef(0);
 
   // Derived options for filters
   const schools = useMemo(() => Array.from(new Set(data.map(d => d.school))).filter(Boolean).sort(), [data]);
@@ -296,11 +297,12 @@ export default function App() {
   }, [data, searchTerm, statusFilter, columnFilters, sortField, sortOrder, activeTab, statusOptions]);
 
   const handleSort = (field: SortField) => {
+    if (Date.now() < ignoreSortUntilRef.current) return;
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortOrder('asc');
+      setSortOrder(field === 'date' ? 'desc' : 'asc');
     }
   };
 
@@ -330,7 +332,19 @@ export default function App() {
   };
 
   const handleSaveRow = (updatedRow: Consultation) => {
-    setData(prev => prev.map(row => row.id === updatedRow.id ? updatedRow : row));
+    const visualIds = processedData.map(row => row.id);
+    setData(prev => {
+      const next = prev.map(row => row.id === updatedRow.id ? updatedRow : row);
+      const byId = new Map(next.map(row => [row.id, row]));
+      const used = new Set(visualIds);
+      let i = 0;
+      return prev.map(row => {
+        if (!used.has(row.id)) return byId.get(row.id) ?? row;
+        return byId.get(visualIds[i++])!;
+      });
+    });
+    if (sortField !== 'manual') setSortField('manual');
+    ignoreSortUntilRef.current = Date.now() + 500;
   };
 
   const handleDeleteRow = (id: string) => {

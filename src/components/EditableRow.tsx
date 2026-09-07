@@ -42,6 +42,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
 
   const [showConvert, setShowConvert] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [noteDeleteIndex, setNoteDeleteIndex] = useState<number | null>(null);
   const [convertForm, setConvertForm] = useState({ studentNumber: '', studentPhone: '', parentPhone: '', email: '' });
 
   const [inlineName, setInlineName] = useState(data.name);
@@ -84,21 +85,24 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   }, [grabbed]);
 
   useEffect(() => {
-    if (!isModalOpen && !showConvert && !showDelete && !memoEditing) return;
+    if (!isModalOpen && !showConvert && !showDelete && !memoEditing && noteDeleteIndex === null) return;
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsModalOpen(false);
-        setShowConvert(false);
-        setShowDelete(false);
-        if (memoEditing) {
-          setInlineMemo(data.memo || '');
-          setMemoEditing(false);
-        }
+      if (e.key !== 'Escape') return;
+      if (noteDeleteIndex !== null) {
+        setNoteDeleteIndex(null);
+        return;
+      }
+      setIsModalOpen(false);
+      setShowConvert(false);
+      setShowDelete(false);
+      if (memoEditing) {
+        setInlineMemo(data.memo || '');
+        setMemoEditing(false);
       }
     };
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
-  }, [isModalOpen, showConvert, showDelete, memoEditing]);
+  }, [isModalOpen, showConvert, showDelete, memoEditing, noteDeleteIndex]);
 
   const selectableStatuses = statusOptions.filter(status => status !== ENROLLED_STATUS);
   const gradeSelectOptions = [...new Set([...GRADE_OPTIONS, ...gradeOptions])];
@@ -138,6 +142,12 @@ export const EditableRow: React.FC<EditableRowProps> = ({
     onSave({ ...data, notes: updatedNotes });
     setModalNewNote('');
     setNewDate(new Date().toISOString().split('T')[0]);
+  };
+
+  const confirmDeleteNote = () => {
+    if (noteDeleteIndex === null) return;
+    onSave({ ...data, notes: data.notes.filter((_, i) => i !== noteDeleteIndex) });
+    setNoteDeleteIndex(null);
   };
 
   const cellClass = 'px-2 py-1.5 text-sm text-gray-700 border-b border-gray-100 align-middle text-center';
@@ -404,7 +414,6 @@ export const EditableRow: React.FC<EditableRowProps> = ({
             </div>
             <div className="p-4 border-b border-gray-200">
               <label className="block text-sm font-semibold text-gray-800 mb-1">학생 특징 / 상담 요약</label>
-              <p className="text-xs text-gray-500 mb-2">최근 특이사항이나 이전 상담 결과를 적어 두면, 상담내역을 모두 읽지 않아도 됩니다.</p>
               <textarea
                 value={inlineProfile}
                 onChange={(e) => setInlineProfile(e.target.value)}
@@ -437,13 +446,23 @@ export const EditableRow: React.FC<EditableRowProps> = ({
             </div>
             <div className="p-4 overflow-y-auto flex-1">
               <div className="space-y-4">
-                {[...data.notes].reverse().map((note, idx) => (
-                  <div key={idx} className="flex flex-col gap-1">
+                {[...data.notes].map((note, originalIndex) => ({ note, originalIndex })).reverse().map(({ note, originalIndex }) => (
+                  <div key={originalIndex} className="flex flex-col gap-1">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-semibold text-sm text-gray-800">{note.date}</span>
                       <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">{note.method}</span>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">{note.content}</div>
+                    <div className="relative bg-gray-50 p-3 pr-8 rounded-lg border border-gray-200 text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">
+                      <button
+                        type="button"
+                        onClick={() => setNoteDeleteIndex(originalIndex)}
+                        className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-200/70 transition-colors"
+                        title="상담 기록 삭제"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                      {note.content}
+                    </div>
                   </div>
                 ))}
                 {data.notes.length === 0 && <div className="text-center text-gray-500 py-8">상담 이력이 없습니다.</div>}
@@ -485,6 +504,23 @@ export const EditableRow: React.FC<EditableRowProps> = ({
             <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-lg">
               <button onClick={() => setShowConvert(false)} className="px-4 py-1.5 rounded text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors">취소</button>
               <button onClick={confirmConvert} className="px-4 py-1.5 rounded text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 transition-colors">원생으로 등록</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noteDeleteIndex !== null && (
+        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col">
+            <div className="p-4 border-b border-gray-200">
+              <h2 className="text-base font-semibold text-gray-800">상담 기록 삭제</h2>
+            </div>
+            <div className="p-4 text-sm text-gray-700 leading-relaxed">
+              이 상담 기록을 삭제하시겠습니까?
+            </div>
+            <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-lg">
+              <button onClick={() => setNoteDeleteIndex(null)} className="px-4 py-1.5 rounded text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors">취소</button>
+              <button onClick={confirmDeleteNote} className="px-4 py-1.5 rounded text-sm font-medium text-white bg-gray-700 hover:bg-gray-800 transition-colors">삭제</button>
             </div>
           </div>
         </div>

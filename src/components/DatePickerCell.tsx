@@ -22,7 +22,10 @@ export const DatePickerCell: React.FC<DatePickerCellProps> = ({ value, onChange 
     <div className="relative h-8 w-full">
       <button
         type="button"
-        onClick={openPicker}
+        onClick={(e) => {
+          e.stopPropagation();
+          openPicker();
+        }}
         className="absolute inset-0 flex items-center justify-center font-mono text-[13px] text-gray-800 tabular-nums rounded hover:bg-white hover:border hover:border-gray-300 focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none"
       >
         {display || '\u00a0'}
