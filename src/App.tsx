@@ -1,12 +1,16 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { initialData } from './data';
-import { Consultation, SortField, SortOrder, DEFAULT_STATUS_OPTIONS, ENROLLED_STATUS, INQUIRY_STATUS, GRADE_OPTIONS, getStatusStyle, migrateStatus, parseDateValue, normalizeDateInput } from './types';
+import { Consultation, SortField, SortOrder, DEFAULT_STATUS_OPTIONS, ENROLLED_STATUS, INQUIRY_STATUS, GRADE_OPTIONS, migrateStatus, parseDateValue, normalizeDateInput } from './types';
 import { EditableRow } from './components/EditableRow';
 import { EditableListItem } from './components/EditableListItem';
-import { ClassBoard } from './components/ClassBoard';
 import { ColumnFilterHeader } from './components/ColumnFilterHeader';
-import { TEACHER_ORDER } from './classData';
+import { CurrentStudentDashboard } from './enrolled/CurrentStudentDashboard';
 import { Search, Plus, ArrowUpDown, ChevronDown, ChevronUp, RotateCcw, Settings, X } from 'lucide-react';
+import { reorderIds } from './components/rowDrag';
+import { NotesModal } from './components/NotesModal';
+import { useRequests } from './requests/RequestContext';
+import { compareStudentsByOpenRequests } from './requests/selectors';
+import { emptyOpenSummary } from './requests/types';
 
 // 요약 카드 및 좁은 화면용 짧은 라벨
 const STATUS_SHORT_LABEL: Record<string, string> = {
@@ -17,6 +21,52 @@ const STATUS_SHORT_LABEL: Record<string, string> = {
   '보류': '보류',
   '반 대기': '반 대기',
   '원생 (등록완료)': '원생',
+};
+
+/** 예비원생 퍼널: 왼쪽에서 오른쪽으로 쿨톤이 조금씩 깊어진다. */
+const PROSPECT_FUNNEL: Record<string, { card: string; selected: string; label: string; count: string }> = {
+  '문의': {
+    card: 'bg-stone-100/80 border-stone-200',
+    selected: 'bg-stone-100 border-stone-400',
+    label: 'text-stone-500',
+    count: 'text-stone-800',
+  },
+  '테스트 대기': {
+    card: 'bg-slate-100 border-slate-200',
+    selected: 'bg-slate-100 border-slate-400',
+    label: 'text-slate-500',
+    count: 'text-slate-800',
+  },
+  '채점대기': {
+    card: 'bg-sky-50 border-sky-200/80',
+    selected: 'bg-sky-100 border-sky-400',
+    label: 'text-sky-700/80',
+    count: 'text-sky-950',
+  },
+  '상담대기': {
+    card: 'bg-blue-50 border-blue-200/80',
+    selected: 'bg-blue-100/80 border-blue-400',
+    label: 'text-blue-700/80',
+    count: 'text-blue-950',
+  },
+  '보류': {
+    card: 'bg-indigo-50/70 border-indigo-100',
+    selected: 'bg-indigo-50 border-indigo-300',
+    label: 'text-indigo-400',
+    count: 'text-indigo-900',
+  },
+  '반 대기': {
+    card: 'bg-indigo-50 border-indigo-200/80',
+    selected: 'bg-indigo-100/80 border-indigo-400',
+    label: 'text-indigo-700/80',
+    count: 'text-indigo-950',
+  },
+  '원생 (등록완료)': {
+    card: 'bg-emerald-50 border-emerald-100',
+    selected: 'bg-emerald-50 border-emerald-400',
+    label: 'text-emerald-700/80',
+    count: 'text-emerald-950',
+  },
 };
 
 // 'G12' -> 12, 'G8 Add Math' -> 8, 없으면 -1
@@ -72,26 +122,23 @@ export default function App() {
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(true);
   const [statusOptions, setStatusOptions] = useState<string[]>(DEFAULT_STATUS_OPTIONS);
 
-  // 페이지 전환 (학생현황판 / 수업현황판)
-  const [page, setPage] = useState<'students' | 'classes'>('students');
-  const [classSearch, setClassSearch] = useState('');
-  const [teacherFilter, setTeacherFilter] = useState<string>('all');
   const studentSearchRef = useRef<HTMLInputElement>(null);
-  const classSearchRef = useRef<HTMLInputElement>(null);
+  const journalButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { openSummaryMap } = useRequests();
+  const [journalStudentId, setJournalStudentId] = useState<string | null>(null);
 
   // Ctrl/Cmd+F → 상단 앱 검색창 포커스 (브라우저 기본 검색 대신)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault();
-        const el = page === 'classes' ? classSearchRef.current : studentSearchRef.current;
-        el?.focus();
-        el?.select();
+        studentSearchRef.current?.focus();
+        studentSearchRef.current?.select();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [page]);
+  }, []);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsNewStatus, setSettingsNewStatus] = useState('');
   const [settingsNewClass, setSettingsNewClass] = useState('');
@@ -106,8 +153,11 @@ export default function App() {
   }, [isSettingsOpen]);
   
   // Filters and Sorting
-  const [activeTab, setActiveTab] = useState<'all' | '원생' | '예비원생'>('all');
+  const [activeTab, setActiveTab] = useState<'원생' | '예비원생'>('원생');
   const [searchTerm, setSearchTerm] = useState('');
+  const [enrolledFilterKey, setEnrolledFilterKey] = useState(0);
+  const [selectedProspectId, setSelectedProspectId] = useState<string | null>(null);
+  const [enrolledOrderByClass, setEnrolledOrderByClass] = useState<Record<string, string[]>>({});
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [columnFilters, setColumnFilters] = useState<{
     school: string[] | null;
@@ -137,27 +187,29 @@ export default function App() {
 
   const tabData = useMemo(() => {
     if (activeTab === '원생') return data.filter(item => item.status === ENROLLED_STATUS);
-    if (activeTab === '예비원생') return data.filter(item => item.status !== ENROLLED_STATUS);
-    return data;
+    return data.filter(item => item.status !== ENROLLED_STATUS);
   }, [data, activeTab]);
 
   const schoolChoices = useMemo(
-    () => Array.from(new Set(tabData.map(d => d.school).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
+    () => {
+      const values = [...new Set(tabData.map(d => d.school).filter((v): v is string => Boolean(v)))] as string[];
+      return values.sort((a, b) => a.localeCompare(b, 'ko'));
+    },
     [tabData]
   );
   const gradeChoices = useMemo(
-    () => sortByGradeDesc([...new Set(tabData.map(d => d.grade).filter(Boolean))]),
+    () => sortByGradeDesc([...new Set(tabData.map(d => d.grade).filter((v): v is string => Boolean(v)))] as string[]),
     [tabData]
   );
   const evalGradeChoices = useMemo(
     () => {
       const vals = tabData.map(d => d.evalGrade || '-');
-      return sortByGradeDesc([...new Set(vals)]);
+      return sortByGradeDesc([...new Set(vals)] as string[]);
     },
     [tabData]
   );
   const classChoices = useMemo(
-    () => sortByGradeDesc([...new Set(tabData.map(d => d.className || '-'))]),
+    () => sortByGradeDesc([...new Set(tabData.map(d => d.className || '-'))] as string[]),
     [tabData]
   );
   const statusChoices = useMemo(
@@ -206,7 +258,7 @@ export default function App() {
     // Apply Tab Filter
     if (activeTab === '원생') {
       result = result.filter(item => item.status === ENROLLED_STATUS);
-    } else if (activeTab === '예비원생') {
+    } else {
       result = result.filter(item => item.status !== ENROLLED_STATUS);
     }
 
@@ -240,6 +292,8 @@ export default function App() {
 
     // Apply Sorting
     const dir = sortOrder === 'asc' ? 1 : -1;
+    const summaryOf = (id: string) => openSummaryMap[id] ?? emptyOpenSummary();
+    const fallbackCompare = (a: Consultation, b: Consultation) => parseDateValue(b.date) - parseDateValue(a.date);
     const compareGrade = (left?: string, right?: string) => {
       const ga = gradeNum(left || '');
       const gb = gradeNum(right || '');
@@ -250,7 +304,7 @@ export default function App() {
     };
     if (sortField === 'manual') {
       const index = new Map(data.map((item, i) => [item.id, i]));
-      result.sort((a, b) => (index.get(a.id) ?? 0) - (index.get(b.id) ?? 0));
+      result.sort((a, b) => Number(index.get(a.id) ?? 0) - Number(index.get(b.id) ?? 0));
       return result;
     }
     result.sort((a, b) => {
@@ -286,15 +340,28 @@ export default function App() {
         if (r !== 0) return r * dir;
         return (a.status || '').localeCompare(b.status || '', 'ko') * dir;
       }
-      const valA = a[sortField] || '';
-      const valB = b[sortField] || '';
+      if (sortField === 'journal') {
+        return compareStudentsByOpenRequests(a, b, summaryOf, fallbackCompare) * dir;
+      }
+      const valA = (sortField === 'name' || sortField === 'studentPhone' ? a[sortField] : '') || '';
+      const valB = (sortField === 'name' || sortField === 'studentPhone' ? b[sortField] : '') || '';
       if (valA < valB) return -1 * dir;
       if (valA > valB) return 1 * dir;
       return 0;
     });
 
     return result;
-  }, [data, searchTerm, statusFilter, columnFilters, sortField, sortOrder, activeTab, statusOptions]);
+  }, [
+    data,
+    searchTerm,
+    statusFilter,
+    columnFilters,
+    sortField,
+    sortOrder,
+    activeTab,
+    statusOptions,
+    openSummaryMap,
+  ]);
 
   const handleSort = (field: SortField) => {
     if (Date.now() < ignoreSortUntilRef.current) return;
@@ -302,7 +369,7 @@ export default function App() {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortOrder(field === 'date' ? 'desc' : 'asc');
+      setSortOrder(field === 'date' || field === 'journal' ? 'desc' : 'asc');
     }
   };
 
@@ -313,6 +380,7 @@ export default function App() {
     setOpenColumnFilter(null);
     setSortField('date');
     setSortOrder('desc');
+    setEnrolledFilterKey((key) => key + 1);
   };
 
   const handleRenameStatus = (oldStatus: string, newStatus: string) => {
@@ -352,22 +420,13 @@ export default function App() {
   };
 
   const handleReorderRows = (fromId: string, toId: string, place: 'before' | 'after' = 'before') => {
-    if (!fromId || !toId || fromId === toId) return;
-    const visibleIds = processedData.map(row => row.id);
-    const from = visibleIds.indexOf(fromId);
-    const to = visibleIds.indexOf(toId);
-    if (from < 0 || to < 0) return;
-    const nextVisible = [...visibleIds];
-    const [moved] = nextVisible.splice(from, 1);
-    let insertAt = nextVisible.indexOf(toId);
-    if (insertAt < 0) return;
-    if (place === 'after') insertAt += 1;
-    nextVisible.splice(insertAt, 0, moved);
-    setData(prev => {
-      const byId = new Map(prev.map(row => [row.id, row]));
+    const nextVisible = reorderIds(processedData.map((row) => row.id), fromId, toId, place);
+    if (!nextVisible) return;
+    setData((prev) => {
+      const byId = new Map(prev.map((row) => [row.id, row]));
       const used = new Set(nextVisible);
       let i = 0;
-      return prev.map(row => {
+      return prev.map((row) => {
         if (!used.has(row.id)) return row;
         return byId.get(nextVisible[i++])!;
       });
@@ -395,185 +454,153 @@ export default function App() {
   };
 
   const isStudentView = activeTab === '원생';
+  const isProspectBoard = activeTab === '예비원생';
+  const filterAlign = 'left' as const;
+  const journalStudent = data.find((row) => row.id === journalStudentId) ?? null;
+
+  const closeProspectJournal = () => {
+    const studentId = journalStudentId;
+    setJournalStudentId(null);
+    window.requestAnimationFrame(() => {
+      if (!studentId) return;
+      journalButtonRef.current?.focus();
+    });
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col">
+    <div className="min-h-screen bg-[#f6f6f4] text-neutral-900 flex flex-col">
       {/* Header & Control Bar */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
         <div className="px-4 py-3 flex items-center gap-4">
-          {/* Left: 페이지 전환 + 페이지별 서브 컨트롤 */}
           <div className="flex items-center gap-3 shrink-0">
-            <div className="flex bg-gray-100 p-1 rounded-lg">
-              <button
-                onClick={() => setPage('students')}
-                className={`px-3 py-1.5 text-sm font-bold rounded-md transition-all ${page === 'students' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                학생현황판
-              </button>
-              <button
-                onClick={() => setPage('classes')}
-                className={`px-3 py-1.5 text-sm font-bold rounded-md transition-all ${page === 'classes' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                수업현황판
-              </button>
+            <div className="flex bg-neutral-100 p-0.5 rounded-md">
+              <button onClick={() => { setActiveTab('원생'); setStatusFilter('all'); setSelectedProspectId(null); }} className={`px-3 py-1.5 text-[13px] rounded-sm transition-colors ${activeTab === '원생' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-800'}`}>원생</button>
+              <button onClick={() => { setActiveTab('예비원생'); setStatusFilter('all'); setSelectedProspectId(null); }} className={`px-3 py-1.5 text-[13px] rounded-sm transition-colors ${activeTab === '예비원생' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-800'}`}>예비원생</button>
             </div>
-
-            {page === 'students' && (
-              <div className="flex bg-gray-100 p-1 rounded-lg">
-                <button onClick={() => setActiveTab('all')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'all' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>전체</button>
-                <button onClick={() => setActiveTab('원생')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>원생</button>
-                <button onClick={() => setActiveTab('예비원생')} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === '예비원생' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>예비원생</button>
-              </div>
-            )}
-
-            {page === 'classes' && (
-              <span className="text-sm font-semibold text-gray-600 bg-gray-100 rounded-lg px-3 py-1.5 whitespace-nowrap">
-                2026 여름 특강 참석표
-              </span>
-            )}
           </div>
 
-          {/* Center: 검색 + 필터 (가운데 정렬) */}
           <div className="flex-1 flex items-center justify-center gap-3">
-            {page === 'students' ? (
-              <>
-                <div className="relative flex items-center">
-                  <Search className="w-4 h-4 absolute left-2 text-gray-400" />
-                  <input
-                    ref={studentSearchRef}
-                    type="text"
-                    placeholder="이름 또는 학교 검색..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-64 outline-none"
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="relative flex items-center">
-                  <Search className="w-4 h-4 absolute left-2 text-gray-400" />
-                  <input
-                    ref={classSearchRef}
-                    type="text"
-                    placeholder="반 또는 학생 검색... (Ctrl+F)"
-                    value={classSearch}
-                    onChange={(e) => setClassSearch(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 text-sm bg-gray-100 border-transparent rounded-md focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all w-72 outline-none"
-                  />
-                </div>
-                <select
-                  value={teacherFilter}
-                  onChange={(e) => setTeacherFilter(e.target.value)}
-                  className="text-sm bg-gray-50 border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-auto text-center font-medium"
-                  style={{ textAlignLast: 'center' }}
-                >
-                  <option value="all">모든 선생님</option>
-                  {TEACHER_ORDER.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </>
-            )}
+            <div className="relative flex items-center">
+              <Search className="w-4 h-4 absolute left-2 text-gray-400" />
+              <input
+                ref={studentSearchRef}
+                type="text"
+                placeholder="이름 또는 학교 검색..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-[13px] bg-neutral-100 border-transparent rounded-md focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-all w-64 outline-none"
+              />
+            </div>
           </div>
 
-          {/* Right: 액션 버튼 */}
           <div className="flex items-center gap-2 shrink-0">
-            {page === 'students' ? (
-              <>
-                <button onClick={handleResetAll} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm" title="초기화">
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  초기화
-                </button>
-                <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm" title="설정">
-                  <Settings className="w-4 h-4" />
-                </button>
-                <button onClick={handleAddConsultation} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">
-                  <Plus className="w-4 h-4" />
-                  신규 문의
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => { setClassSearch(''); setTeacherFilter('all'); }}
-                className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
-                title="검색·필터 초기화"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                초기화
-              </button>
-            )}
+            <button onClick={handleResetAll} className="flex items-center gap-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 px-3 py-1.5 rounded-md text-[13px] transition-colors" title="초기화">
+              <RotateCcw className="w-3.5 h-3.5" />
+              초기화
+            </button>
+            <button onClick={() => setIsSettingsOpen(true)} className="flex items-center justify-center w-8 h-8 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition-colors" title="설정">
+              <Settings className="w-4 h-4" />
+            </button>
+            <button onClick={handleAddConsultation} className="flex items-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white px-3 py-1.5 rounded-md text-[13px] transition-colors">
+              <Plus className="w-4 h-4" />
+              신규 문의
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden p-4 flex flex-col gap-4">
+      <main className="flex-1 overflow-hidden flex flex-col px-4 py-3 gap-3">
 
-        {page === 'classes' && (
-          <ClassBoard searchTerm={classSearch} teacherFilter={teacherFilter} />
+        {isStudentView && (
+          <CurrentStudentDashboard
+            key={enrolledFilterKey}
+            students={data.filter((item) => item.status === ENROLLED_STATUS)}
+            classOptions={classOptions}
+            schoolOptions={schools}
+            onSave={handleSaveRow}
+            searchTerm={searchTerm}
+            onResetSearch={() => setSearchTerm('')}
+            classOrder={enrolledOrderByClass}
+            onClassOrderChange={setEnrolledOrderByClass}
+          />
         )}
 
-        {page === 'students' && <>
+        {!isStudentView && <>
         {/* Summary Cards */}
-        <div className="flex flex-col gap-2 shrink-0">
+        <div className="flex flex-col shrink-0 gap-1">
           <div className="flex items-center gap-2">
              <button 
                onClick={() => setIsSummaryExpanded(!isSummaryExpanded)} 
-               className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-gray-900 transition-colors"
+               className="flex items-center gap-1 text-[13px] font-medium text-neutral-600 hover:text-neutral-900 transition-colors"
              >
-               Status 요약
+               상태 요약
                {isSummaryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
              </button>
           </div>
           {isSummaryExpanded && (
-            <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 ${visibleSummaryStatuses.length === 6 ? 'lg:grid-cols-6' : 'lg:grid-cols-7'}`}>
-              {visibleSummaryStatuses.map((status) => (
+            <div className={`grid grid-cols-2 md:grid-cols-3 gap-2 ${visibleSummaryStatuses.length === 6 ? 'lg:grid-cols-6' : 'lg:grid-cols-7'}`}>
+              {visibleSummaryStatuses.map((status) => {
+                const selected = statusFilter === status;
+                const funnel = PROSPECT_FUNNEL[status];
+                return (
                 <div
                   key={status}
-                  className={`rounded-lg border px-3 py-2 flex flex-col justify-center cursor-pointer hover:shadow-sm transition-shadow ${getStatusStyle(status).card} ${statusFilter === status ? 'ring-2 ring-offset-1 ring-blue-400' : ''}`}
-                  onClick={() => setStatusFilter(statusFilter === status ? 'all' : status)}
+                  className={[
+                    'rounded-md border px-3 py-2 flex flex-col justify-center cursor-pointer transition-colors',
+                    selected ? funnel?.selected : funnel?.card,
+                  ].join(' ')}
+                  onClick={() => setStatusFilter(selected ? 'all' : status)}
                 >
-                  <div className="text-[10px] sm:text-xs font-semibold tracking-wide opacity-80 mb-0.5 truncate" title={status}>{STATUS_SHORT_LABEL[status] || status}</div>
-                  <div className="text-xl sm:text-2xl font-bold leading-none">{summaryCounts[status] || 0}<span className="text-sm font-normal ml-1 opacity-70">명</span></div>
+                  <div
+                    className={['text-[12px] mb-1 truncate font-medium', selected ? funnel?.count : funnel?.label].join(' ')}
+                    title={status}
+                  >
+                    {STATUS_SHORT_LABEL[status] || status}
+                  </div>
+                  <div className={['text-[18px] font-semibold leading-none', funnel?.count].join(' ')}>
+                    {summaryCounts[status] || 0}
+                    <span className="text-[12px] font-normal ml-1 text-neutral-400">명</span>
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
         {/* Data Table */}
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden flex flex-col bg-white border border-neutral-200">
           <div className="overflow-auto flex-1">
-            <table className="w-full text-center border-collapse table-fixed min-w-[1220px]">
+            <table className="w-full border-collapse table-fixed min-w-[1360px] text-left">
               <colgroup>
                 <col style={{ width: 16 }} />
               </colgroup>
-              <thead className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 sticky top-0 z-10">
-                <tr>
-                  <th className="px-0 py-2.5 w-4 min-w-4 max-w-4"></th>
+              <thead className="bg-white border-b border-neutral-200 text-[12px] font-medium text-neutral-500 sticky top-0 z-10">
+                <tr className="h-10">
+                  <th className="px-0 py-0 w-4 min-w-4 max-w-4"></th>
                   {isStudentView ? (
                     <th
-                      className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[90px]"
+                      className="px-3 whitespace-nowrap cursor-pointer hover:text-neutral-800 w-[90px]"
                       onClick={() => handleSort('studentNumber')}
                     >
-                      <div className="flex items-center justify-center gap-1">학생번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      <div className="flex items-center gap-1 justify-start">학생번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                     </th>
                   ) : (
                     <th
-                      className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[110px]"
+                      className="px-3 whitespace-nowrap cursor-pointer hover:text-neutral-800 w-[108px]"
                       onClick={() => handleSort('date')}
                     >
-                      <div className="flex items-center justify-center gap-1">문의 날짜 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      <div className="flex items-center gap-1 justify-start">문의일 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                     </th>
                   )}
                   <th
-                    className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[140px]"
+                    className="px-3 whitespace-nowrap cursor-pointer hover:text-neutral-800 w-[148px]"
                     onClick={() => handleSort('name')}
                   >
-                    <div className="flex items-center justify-center gap-1">이름 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                    <div className="flex items-center gap-1 justify-start">이름 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                   </th>
-                  <th className="px-2 py-2.5 whitespace-nowrap w-[200px]">특이사항</th>
-                  <th className="px-1 py-2.5 whitespace-nowrap w-[110px]">
+                  <th className="px-3 whitespace-nowrap w-[140px]">특이사항</th>
+                  <th className="px-3 whitespace-nowrap w-[108px]">
                     <ColumnFilterHeader
                       label="학교"
                       options={schoolChoices}
@@ -582,9 +609,10 @@ export default function App() {
                       onToggle={() => setOpenColumnFilter(openColumnFilter === 'school' ? null : 'school')}
                       onClose={() => setOpenColumnFilter(null)}
                       onChange={(next) => applyColumnFilter('school', next)}
+                      align={filterAlign}
                     />
                   </th>
-                  <th className="px-1 py-2.5 whitespace-nowrap w-[80px]">
+                  <th className="px-3 whitespace-nowrap w-[72px]">
                     <ColumnFilterHeader
                       label="학년"
                       options={gradeChoices}
@@ -593,18 +621,19 @@ export default function App() {
                       onToggle={() => setOpenColumnFilter(openColumnFilter === 'grade' ? null : 'grade')}
                       onClose={() => setOpenColumnFilter(null)}
                       onChange={(next) => applyColumnFilter('grade', next)}
+                      align={filterAlign}
                     />
                   </th>
                   {isStudentView ? (
                     <th
-                      className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[140px]"
+                      className="px-3 whitespace-nowrap cursor-pointer hover:text-neutral-800 w-[140px]"
                       onClick={() => handleSort('studentPhone')}
                     >
-                      <div className="flex items-center justify-center gap-1">학생 전화번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      <div className="flex items-center gap-1 justify-start">학생 전화번호 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                     </th>
                   ) : (
                     <>
-                      <th className="px-1 py-2.5 whitespace-nowrap w-[88px]">
+                      <th className="px-3 whitespace-nowrap w-[88px]">
                         <ColumnFilterHeader
                           label="평가학년"
                           options={evalGradeChoices}
@@ -613,40 +642,43 @@ export default function App() {
                           onToggle={() => setOpenColumnFilter(openColumnFilter === 'evalGrade' ? null : 'evalGrade')}
                           onClose={() => setOpenColumnFilter(null)}
                           onChange={(next) => applyColumnFilter('evalGrade', next)}
+                          align={filterAlign}
                         />
                       </th>
                       <th
-                        className="px-2 py-2.5 whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors w-[110px]"
+                        className="px-3 whitespace-nowrap cursor-pointer hover:text-neutral-800 w-[108px]"
                         onClick={() => handleSort('testDate')}
                       >
-                        <div className="flex items-center justify-center gap-1">테스트일 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                        <div className="flex items-center gap-1 justify-start">테스트일 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
                       </th>
-                      <th className="px-1 py-2.5 whitespace-nowrap w-[150px]">
+                      <th className="px-3 whitespace-nowrap w-[148px]">
                         <ColumnFilterHeader
-                          label="추천 반"
+                          label="추천반"
                           options={classChoices}
                           selected={columnFilters.className}
                           isOpen={openColumnFilter === 'className'}
                           onToggle={() => setOpenColumnFilter(openColumnFilter === 'className' ? null : 'className')}
                           onClose={() => setOpenColumnFilter(null)}
                           onChange={(next) => applyColumnFilter('className', next)}
+                          align={filterAlign}
                         />
                       </th>
-                      <th className="px-1 py-2.5 whitespace-nowrap w-[108px]">
+                      <th className="px-3 whitespace-nowrap w-[108px]">
                         <ColumnFilterHeader
-                          label="Status"
+                          label="상태"
                           options={statusChoices}
                           selected={columnFilters.status}
                           isOpen={openColumnFilter === 'status'}
                           onToggle={() => setOpenColumnFilter(openColumnFilter === 'status' ? null : 'status')}
                           onClose={() => setOpenColumnFilter(null)}
                           onChange={(next) => applyColumnFilter('status', next)}
+                          align={filterAlign}
                         />
                       </th>
                     </>
                   )}
                   {isStudentView && (
-                    <th className="px-1 py-2.5 whitespace-nowrap w-[140px]">
+                    <th className="px-3 whitespace-nowrap w-[140px]">
                       <ColumnFilterHeader
                         label="반"
                         options={classChoices}
@@ -655,30 +687,70 @@ export default function App() {
                         onToggle={() => setOpenColumnFilter(openColumnFilter === 'className' ? null : 'className')}
                         onClose={() => setOpenColumnFilter(null)}
                         onChange={(next) => applyColumnFilter('className', next)}
+                        align={filterAlign}
                       />
                     </th>
                   )}
-                  <th className="px-2 py-2.5 whitespace-nowrap w-[88px]">상담내역</th>
-                  {!isStudentView && <th className="px-2 py-2.5 whitespace-nowrap w-[104px]"></th>}
-                  <th className="px-2 py-2.5 whitespace-nowrap w-[40px]"></th>
+                  {isProspectBoard ? (
+                    <>
+                      <th
+                        className="px-3 whitespace-nowrap w-[220px] sticky right-[112px] bg-white z-20 border-0 cursor-pointer hover:text-neutral-800"
+                        onClick={() => handleSort('journal')}
+                      >
+                        <div className="flex items-center gap-1 justify-start">상담일지 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      </th>
+                      <th className="px-2 whitespace-nowrap w-[72px] sticky right-10 bg-white z-20 border-0">원생등록</th>
+                      <th className="px-1 whitespace-nowrap w-10 sticky right-0 bg-white z-20 border-0" aria-label="더보기"></th>
+                    </>
+                  ) : (
+                    <>
+                      <th
+                        className="px-3 whitespace-nowrap w-[220px] sticky right-10 bg-white z-20 border-0 cursor-pointer hover:text-neutral-800"
+                        onClick={() => handleSort('journal')}
+                      >
+                        <div className="flex items-center gap-1 justify-start">상담일지 <ArrowUpDown className="w-3 h-3 opacity-50" /></div>
+                      </th>
+                      <th className="px-1 whitespace-nowrap w-10 sticky right-0 bg-white z-20 border-0" aria-label="더보기"></th>
+                    </>
+                  )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {processedData.length > 0 ? (
                   processedData.map((row) => (
-                    <EditableRow key={row.id} data={row} onSave={handleSaveRow} onDelete={handleDeleteRow} onReorder={handleReorderRows} statusOptions={statusOptions} classOptions={classOptions} schoolOptions={schools} gradeOptions={grades} isStudentView={isStudentView} nextStudentNumber={nextStudentNumber} displayStudentNumber={shortStudentNum} />
+                    <EditableRow
+                      key={row.id}
+                      data={row}
+                      onSave={handleSaveRow}
+                      onDelete={handleDeleteRow}
+                      onReorder={handleReorderRows}
+                      selected={selectedProspectId === row.id}
+                      onSelect={() => setSelectedProspectId(row.id)}
+                      statusOptions={statusOptions}
+                      classOptions={classOptions}
+                      schoolOptions={schools}
+                      gradeOptions={grades}
+                      isStudentView={isStudentView}
+                      isProspectBoard={isProspectBoard}
+                      nextStudentNumber={nextStudentNumber}
+                      displayStudentNumber={shortStudentNum}
+                      onOpenJournal={(button) => {
+                        journalButtonRef.current = button;
+                        setJournalStudentId(row.id);
+                      }}
+                    />
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={isStudentView ? 10 : 13} className="px-4 py-8 text-center text-gray-500 text-sm">
-                      조건에 맞는 상담 내역이 없습니다.
+                    <td colSpan={isStudentView ? 10 : 13} className="px-4 py-8 text-center text-neutral-400 text-[13px]">
+                      조건에 맞는 학생이 없습니다.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-          <div className="bg-gray-50 border-t border-gray-200 px-4 py-2 text-xs text-gray-500 flex justify-between">
+          <div className="border-t border-neutral-200 px-4 py-2 text-[12px] text-neutral-400 flex justify-between bg-white">
             <span>총 {processedData.length}건</span>
             <span>데이터는 브라우저 메모리에 임시 저장됩니다.</span>
           </div>
@@ -724,10 +796,11 @@ export default function App() {
                   </div>
                   <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
                     {statusOptions.map(status => (
-                      <EditableListItem 
-                        key={status} 
-                        value={status} 
+                      <EditableListItem
+                        key={status}
+                        value={status}
                         onRename={handleRenameStatus}
+                        confirmDelete
                         onDelete={() => setStatusOptions(statusOptions.filter(s => s !== status))}
                       />
                     ))}
@@ -775,6 +848,15 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {journalStudent && (
+        <NotesModal
+          open
+          student={journalStudent}
+          onSave={handleSaveRow}
+          onClose={closeProspectJournal}
+        />
       )}
     </div>
   );

@@ -68,6 +68,19 @@ export const getStatusStyle = (status: string) =>
     card: 'bg-gray-50 border-gray-200 text-gray-800',
   };
 
+/** 행 상태 점. 의미색은 브랜드·경고·성공만 쓴다. */
+export const STATUS_DOT: Record<string, string> = {
+  '문의': 'bg-neutral-400',
+  '테스트 대기': 'bg-neutral-400',
+  '채점대기': 'bg-amber-500',
+  '상담대기': 'bg-amber-500',
+  '보류': 'bg-indigo-300',
+  '반 대기': 'bg-blue-600',
+  '원생 (등록완료)': 'bg-emerald-600',
+};
+
+export const getStatusDot = (status: string) => STATUS_DOT[status] || 'bg-neutral-400';
+
 export interface ConsultationNote {
   date: string;
   method: string;
@@ -97,7 +110,7 @@ export interface Consultation {
   email?: string;
 }
 
-export type SortField = 'date' | 'name' | 'school' | 'grade' | 'status' | 'className' | 'evalGrade' | 'testDate' | 'studentNumber' | 'studentPhone' | 'manual';
+export type SortField = 'date' | 'name' | 'school' | 'grade' | 'status' | 'className' | 'evalGrade' | 'testDate' | 'studentNumber' | 'studentPhone' | 'journal' | 'manual';
 export type SortOrder = 'asc' | 'desc';
 
 const MONTH_NAME: Record<string, number> = {

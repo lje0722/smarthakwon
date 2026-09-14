@@ -9,6 +9,7 @@ interface ColumnFilterHeaderProps {
   onToggle: () => void;
   onClose: () => void;
   onChange: (next: string[] | null) => void;
+  align?: 'center' | 'left';
 }
 
 export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
@@ -19,6 +20,7 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
   onToggle,
   onClose,
   onChange,
+  align = 'center',
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const active = selected !== null;
@@ -50,11 +52,11 @@ export const ColumnFilterHeader: React.FC<ColumnFilterHeaderProps> = ({
   };
 
   return (
-    <div ref={rootRef} className="relative flex justify-center">
+    <div ref={rootRef} className={`relative flex ${align === 'left' ? 'justify-start' : 'justify-center'}`}>
       <button
         type="button"
         onClick={onToggle}
-        className={`inline-flex items-center justify-center gap-1 w-full px-1 py-0.5 rounded transition-colors ${active ? 'text-blue-700' : 'text-gray-600'}`}
+        className={`inline-flex items-center gap-1 py-0.5 rounded transition-colors ${align === 'left' ? 'justify-start px-0' : 'justify-center w-full px-1'} ${active ? 'text-blue-700' : 'text-neutral-500'}`}
       >
         <span>{label}</span>
         <ArrowUpDown className={`w-3 h-3 ${active ? 'opacity-80' : 'opacity-50'}`} />

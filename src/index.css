@@ -1,1 +1,19 @@
 @import "tailwindcss";
+
+body {
+  font-family: Pretendard, "Noto Sans KR", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+tr[data-row-drag] {
+  cursor: grab;
+}
+
+tr[data-row-drag]:active {
+  cursor: grabbing;
+}
+
+tr[data-row-drag] :is(input, select, textarea) {
+  cursor: pointer;
+}

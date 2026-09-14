@@ -1,8 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Consultation, ENROLLED_STATUS, GRADE_OPTIONS, getStatusStyle } from '../types';
-import { X, GraduationCap } from 'lucide-react';
+import { Consultation, ENROLLED_STATUS, GRADE_OPTIONS, getStatusDot } from '../types';
+import { X, GraduationCap, MoreHorizontal } from 'lucide-react';
 import { DatePickerCell } from './DatePickerCell';
+import { JournalButton } from '../requests/JournalButton';
+import { useRequests } from '../requests/RequestContext';
+import {
+  dropEdgeFromPointer,
+  dropLineClass,
+  hideDragGhost,
+  isRowDragInteractive,
+  rowFillClass,
+  useRowDropEdge,
+} from './rowDrag';
+
 
 interface EditableRowProps {
   data: Consultation;
@@ -12,14 +23,24 @@ interface EditableRowProps {
   schoolOptions: string[];
   gradeOptions: string[];
   isStudentView?: boolean;
+  isProspectBoard?: boolean;
   nextStudentNumber?: string;
   displayStudentNumber?: (s?: string) => string;
   onDelete?: (id: string) => void;
   onReorder?: (fromId: string, toId: string, place: 'before' | 'after') => void;
+  selected?: boolean;
+  onSelect?: () => void;
+  onOpenJournal?: (button: HTMLButtonElement | null) => void;
 }
 
 const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
   if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+};
+
+const memoPreview = (text: string): { tags: string[] } | { text: string } => {
+  const parts = text.split(/[,/·|]/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) return { tags: parts.slice(0, 2) };
+  return { text: text.length > 22 ? `${text.slice(0, 22)}…` : text };
 };
 
 export const EditableRow: React.FC<EditableRowProps> = ({
@@ -30,19 +51,25 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   schoolOptions,
   gradeOptions,
   isStudentView = false,
+  isProspectBoard = false,
   nextStudentNumber = '',
   displayStudentNumber,
   onDelete,
   onReorder,
+  selected = false,
+  onSelect,
+  onOpenJournal,
 }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalNewNote, setModalNewNote] = useState('');
-  const [modalNewMethod, setModalNewMethod] = useState('일반 전화');
-  const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+  const journalRef = useRef<HTMLButtonElement>(null);
+  const { openSummary } = useRequests();
+  const journalSummary = openSummary(data.id);
 
   const [showConvert, setShowConvert] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const [noteDeleteIndex, setNoteDeleteIndex] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
   const [convertForm, setConvertForm] = useState({ studentNumber: '', studentPhone: '', parentPhone: '', email: '' });
 
   const [inlineName, setInlineName] = useState(data.name);
@@ -51,17 +78,13 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   const [inlineMemo, setInlineMemo] = useState(data.memo || '');
   useEffect(() => { setInlineMemo(data.memo || ''); }, [data.memo]);
   const [memoEditing, setMemoEditing] = useState(false);
-  const [dropEdge, setDropEdge] = useState<'before' | 'after' | null>(null);
-  const [grabbed, setGrabbed] = useState(false);
+  const { dropEdge, setDropEdge, dragging, setDragging } = useRowDropEdge();
   const [memoRect, setMemoRect] = useState<DOMRect | null>(null);
   const memoAreaRef = useRef<HTMLTextAreaElement>(null);
   const memoCellRef = useRef<HTMLTableCellElement>(null);
 
   const [inlinePhone, setInlinePhone] = useState(data.studentPhone || '');
   useEffect(() => { setInlinePhone(data.studentPhone || ''); }, [data.studentPhone]);
-
-  const [inlineProfile, setInlineProfile] = useState(data.profile || '');
-  useEffect(() => { setInlineProfile(data.profile || ''); }, [data.profile]);
 
   useEffect(() => {
     if (!memoEditing) return;
@@ -78,21 +101,24 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   }, [memoEditing, data, onSave]);
 
   useEffect(() => {
-    if (!grabbed) return;
-    const release = () => setGrabbed(false);
-    window.addEventListener('mouseup', release);
-    return () => window.removeEventListener('mouseup', release);
-  }, [grabbed]);
+    if (!menuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || moreBtnRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [menuOpen]);
 
   useEffect(() => {
-    if (!isModalOpen && !showConvert && !showDelete && !memoEditing && noteDeleteIndex === null) return;
+    if (!showConvert && !showDelete && !memoEditing && !menuOpen) return;
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (noteDeleteIndex !== null) {
-        setNoteDeleteIndex(null);
+      if (menuOpen) {
+        setMenuOpen(false);
         return;
       }
-      setIsModalOpen(false);
       setShowConvert(false);
       setShowDelete(false);
       if (memoEditing) {
@@ -102,7 +128,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
     };
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
-  }, [isModalOpen, showConvert, showDelete, memoEditing, noteDeleteIndex]);
+  }, [showConvert, showDelete, memoEditing, menuOpen]);
 
   const selectableStatuses = statusOptions.filter(status => status !== ENROLLED_STATUS);
   const gradeSelectOptions = [...new Set([...GRADE_OPTIONS, ...gradeOptions])];
@@ -126,6 +152,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
   };
 
   const confirmConvert = () => {
+    // 등록은 같은 Consultation.id를 유지한다. 요청은 studentId로 이어지며 중복 생성하지 않는다.
     onSave({
       ...data,
       status: ENROLLED_STATUS,
@@ -137,41 +164,45 @@ export const EditableRow: React.FC<EditableRowProps> = ({
     setShowConvert(false);
   };
 
-  const handleAddNoteFromModal = () => {
-    const updatedNotes = [...data.notes, { date: newDate, method: modalNewMethod, content: modalNewNote }];
-    onSave({ ...data, notes: updatedNotes });
-    setModalNewNote('');
-    setNewDate(new Date().toISOString().split('T')[0]);
+  const fill = rowFillClass({ dragging, selected });
+  const line = dropLineClass(dropEdge);
+  const cellClass = `px-3 h-12 text-[13px] text-neutral-600 border-b border-neutral-100 align-middle ${line}`;
+  const fieldClass = 'w-full h-7 px-0 text-[13px] text-left bg-transparent border-0 outline-none';
+  const selectClass = 'w-full h-7 px-0 text-[13px] text-left text-neutral-600 bg-transparent border-0 outline-none appearance-none cursor-pointer';
+  const stickyAction = `sticky ${fill}`;
+  const memoView = inlineMemo ? memoPreview(inlineMemo) : null;
+  const openMemo = () => {
+    setMemoRect(memoCellRef.current?.getBoundingClientRect() ?? null);
+    setMemoEditing(true);
   };
-
-  const confirmDeleteNote = () => {
-    if (noteDeleteIndex === null) return;
-    onSave({ ...data, notes: data.notes.filter((_, i) => i !== noteDeleteIndex) });
-    setNoteDeleteIndex(null);
-  };
-
-  const cellClass = 'px-2 py-1.5 text-sm text-gray-700 border-b border-gray-100 align-middle text-center';
-  const fieldClass = 'w-full h-8 px-1.5 text-sm text-center bg-transparent border border-transparent hover:border-gray-300 hover:bg-white focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded outline-none transition-colors cursor-text';
-  const selectClass = 'w-full h-8 px-1.5 text-sm text-center bg-transparent border border-transparent hover:border-gray-300 hover:bg-white focus:bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded outline-none transition-colors appearance-none cursor-pointer';
 
   return (
     <>
       <tr
-        className={`group hover:bg-gray-50/80 transition-colors ${
-          grabbed ? 'bg-slate-100/80' : ''
-        } ${
-          dropEdge === 'before'
-            ? '[&>td]:shadow-[inset_0_2px_0_0_rgba(147,197,253,0.95)]'
-            : dropEdge === 'after'
-              ? '[&>td]:shadow-[inset_0_-2px_0_0_rgba(147,197,253,0.95)]'
-              : ''
-        }`}
+        className={`group transition-colors ${fill}`}
+        draggable={Boolean(onReorder)}
+        data-row-drag={onReorder ? true : undefined}
+        onMouseDown={() => onSelect?.()}
+        onDragStart={(e) => {
+          if (!onReorder || isRowDragInteractive(e.target)) {
+            e.preventDefault();
+            return;
+          }
+          onSelect?.();
+          setDragging(true);
+          e.dataTransfer.setData('text/plain', data.id);
+          e.dataTransfer.effectAllowed = 'move';
+          hideDragGhost(e);
+        }}
         onDragOver={(e) => {
           if (!onReorder) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
-          const rect = e.currentTarget.getBoundingClientRect();
-          setDropEdge(e.clientY < rect.top + rect.height / 2 ? 'before' : 'after');
+          if (dragging) {
+            setDropEdge(null);
+            return;
+          }
+          setDropEdge(dropEdgeFromPointer(e.clientY, e.currentTarget.getBoundingClientRect()));
         }}
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropEdge(null);
@@ -179,46 +210,30 @@ export const EditableRow: React.FC<EditableRowProps> = ({
         onDrop={(e) => {
           if (!onReorder) return;
           e.preventDefault();
-          const place = dropEdge ?? 'before';
+          const place = dropEdgeFromPointer(e.clientY, e.currentTarget.getBoundingClientRect());
           setDropEdge(null);
           onReorder(e.dataTransfer.getData('text/plain'), data.id, place);
         }}
+        onDragEnd={() => {
+          setDragging(false);
+          setDropEdge(null);
+        }}
       >
-        <td className={`${cellClass} w-4 min-w-4 max-w-4 px-0 relative`}>
-          <div
-            draggable
-            onMouseDown={() => setGrabbed(true)}
-            onDragStart={(e) => {
-              setGrabbed(true);
-              e.dataTransfer.setData('text/plain', data.id);
-              e.dataTransfer.effectAllowed = 'move';
-            }}
-            onDragEnd={() => {
-              setGrabbed(false);
-              setDropEdge(null);
-            }}
-            role="button"
-            aria-label="드래그하여 순서 변경"
-            title="드래그하여 순서 변경"
-            className={`absolute inset-0 cursor-grab active:cursor-grabbing ${
-              grabbed ? 'bg-slate-200/70' : 'hover:bg-slate-100/80'
-            }`}
-          />
-        </td>
+        <td className={`${cellClass} w-4 min-w-4 max-w-4 px-0`} aria-hidden="true" />
         <td className={cellClass}>
           {isStudentView ? (
             <span
-              className="font-mono text-[13px] font-semibold text-gray-800 whitespace-nowrap"
+              className="font-mono text-[12px] tabular-nums text-neutral-500 whitespace-nowrap"
               title={data.studentNumber || ''}
             >
               {displayStudentNumber ? displayStudentNumber(data.studentNumber) : (data.studentNumber || '')}
             </span>
           ) : (
-            <DatePickerCell value={data.date} onChange={(next) => onSave({ ...data, date: next })} />
+            <DatePickerCell value={data.date} onChange={(next) => onSave({ ...data, date: next })} muted />
           )}
         </td>
 
-        <td className={`${cellClass} font-medium`}>
+        <td className={cellClass}>
           <input
             type="text"
             value={inlineName}
@@ -227,21 +242,39 @@ export const EditableRow: React.FC<EditableRowProps> = ({
               if (inlineName !== data.name) onSave({ ...data, name: inlineName.trim() });
             }}
             onKeyDown={blurOnEnter}
-            className={`${fieldClass} font-semibold text-gray-900`}
+            className={`${fieldClass} text-[14px] font-medium text-neutral-900`}
           />
         </td>
 
-        <td ref={memoCellRef} className={`${cellClass} relative`}>
+        <td
+          ref={memoCellRef}
+          className={`${cellClass} relative`}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (memoEditing) return;
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              openMemo();
+            }
+          }}
+        >
           <button
             type="button"
-            onClick={() => {
-              setMemoRect(memoCellRef.current?.getBoundingClientRect() ?? null);
-              setMemoEditing(true);
-            }}
+            onClick={openMemo}
             title={inlineMemo}
-            className={`${fieldClass} text-[13px] text-gray-700 truncate`}
+            className="w-full h-7 text-left text-[12px] text-neutral-600 truncate outline-none"
           >
-            {inlineMemo || '\u00a0'}
+            {memoView && 'tags' in memoView
+              ? (
+                <span className="inline-flex items-center gap-1">
+                  {memoView.tags.map((tag) => (
+                    <span key={tag} className="max-w-[72px] truncate text-[11px] text-neutral-600">{tag}</span>
+                  ))}
+                </span>
+              )
+              : memoView && 'text' in memoView
+                ? memoView.text
+                : ''}
           </button>
           {memoEditing && createPortal(
             <textarea
@@ -261,7 +294,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
                 width: Math.max(memoRect?.width ?? 200, 320),
                 zIndex: 80,
               }}
-              className="min-h-[88px] px-2.5 py-2 text-[13px] text-gray-800 bg-white border border-blue-400 rounded-md shadow-xl outline-none resize-y leading-relaxed"
+              className="min-h-[88px] px-2.5 py-2 text-[13px] text-neutral-800 bg-white border border-neutral-300 rounded-md shadow-lg outline-none resize-y leading-relaxed"
             />,
             document.body
           )}
@@ -271,8 +304,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
           <select
             value={data.school}
             onChange={(e) => onSave({ ...data, school: e.target.value })}
-            className={selectClass}
-            style={{ textAlignLast: 'center' }}
+            className={`${selectClass} ${!data.school ? 'text-neutral-300' : ''}`}
           >
             {!data.school && <option value="">-</option>}
             {!schoolOptions.includes(data.school) && data.school && <option value={data.school}>{data.school}</option>}
@@ -284,8 +316,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
           <select
             value={data.grade}
             onChange={(e) => onSave({ ...data, grade: e.target.value })}
-            className={`${selectClass} font-medium`}
-            style={{ textAlignLast: 'center' }}
+            className={`${selectClass} ${data.grade ? '' : 'text-neutral-300'}`}
           >
             {!data.grade && <option value="">-</option>}
             {!gradeSelectOptions.includes(data.grade) && data.grade && <option value={data.grade}>{data.grade}</option>}
@@ -303,7 +334,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
                 if (inlinePhone !== (data.studentPhone || '')) onSave({ ...data, studentPhone: inlinePhone.trim() });
               }}
               onKeyDown={blurOnEnter}
-              className={`${fieldClass} font-mono text-[13px]`}
+              className={`${fieldClass} font-mono text-[13px] ${inlinePhone ? 'text-neutral-600' : 'text-neutral-300'}`}
             />
           </td>
         ) : (
@@ -311,8 +342,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
             <select
               value={data.evalGrade || ''}
               onChange={(e) => onSave({ ...data, evalGrade: e.target.value })}
-              className={`${selectClass} font-medium`}
-              style={{ textAlignLast: 'center' }}
+              className={`${selectClass} ${data.evalGrade ? 'text-neutral-600' : 'text-neutral-300'}`}
             >
               <option value="">-</option>
               {data.evalGrade && !gradeSelectOptions.includes(data.evalGrade) && (
@@ -328,8 +358,7 @@ export const EditableRow: React.FC<EditableRowProps> = ({
             <select
               value={data.className}
               onChange={(e) => onSave({ ...data, className: e.target.value })}
-              className={selectClass}
-              style={{ textAlignLast: 'center' }}
+              className={`${selectClass} truncate ${!data.className || data.className === '-' ? 'text-neutral-300' : ''}`}
             >
               <option value="-">-</option>
               {!classOptions.includes(data.className) && data.className !== '-' && <option value={data.className}>{data.className}</option>}
@@ -339,14 +368,13 @@ export const EditableRow: React.FC<EditableRowProps> = ({
         ) : (
           <>
             <td className={cellClass}>
-              <DatePickerCell value={data.testDate} onChange={(next) => onSave({ ...data, testDate: next })} />
+              <DatePickerCell value={data.testDate} onChange={(next) => onSave({ ...data, testDate: next })} muted />
             </td>
             <td className={cellClass}>
               <select
                 value={data.className}
                 onChange={(e) => onSave({ ...data, className: e.target.value })}
-                className={`${selectClass} truncate`}
-                style={{ textAlignLast: 'center' }}
+                className={`${selectClass} truncate ${!data.className || data.className === '-' ? 'text-neutral-300' : ''}`}
                 title={data.className}
               >
                 <option value="-">-</option>
@@ -355,122 +383,82 @@ export const EditableRow: React.FC<EditableRowProps> = ({
               </select>
             </td>
             <td className={cellClass}>
-              <select
-                value={data.status}
-                onChange={(e) => handleStatusSelect(e.target.value)}
-                className={`h-8 px-2 text-[11px] font-semibold rounded-full border cursor-pointer outline-none appearance-none w-full text-center ${getStatusStyle(data.status).badge}`}
-                style={{ textAlignLast: 'center' }}
-                title={data.status}
-              >
-                {!selectableStatuses.includes(data.status) && <option value={data.status}>{data.status}</option>}
-                {selectableStatuses.map(opt => <option key={opt} value={opt} className="bg-white text-gray-900">{opt}</option>)}
-              </select>
+              <div className="inline-flex items-center gap-1.5 max-w-full">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getStatusDot(data.status)}`} />
+                <select
+                  value={data.status}
+                  onChange={(e) => handleStatusSelect(e.target.value)}
+                  className="h-7 min-w-0 flex-1 text-[13px] font-normal text-neutral-600 bg-transparent border-0 outline-none appearance-none cursor-pointer"
+                  title={data.status}
+                >
+                  {!selectableStatuses.includes(data.status) && <option value={data.status}>{data.status}</option>}
+                  {selectableStatuses.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
             </td>
           </>
         )}
 
-        <td className={cellClass}>
-          <button
-            type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="inline-flex items-center justify-center h-8 px-3 text-xs font-medium rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors whitespace-nowrap"
-          >
-            상담내역
-          </button>
-        </td>
-
-        {!isStudentView && (
-          <td className={`${cellClass} whitespace-nowrap`}>
-            {data.status !== ENROLLED_STATUS ? (
-              <button
-                type="button"
-                onClick={openConvert}
-                className="inline-flex items-center justify-center gap-1 h-8 px-2.5 text-xs font-medium rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors"
-              >
-                <GraduationCap className="w-3.5 h-3.5" />
-                원생 등록
-              </button>
-            ) : null}
-          </td>
-        )}
-        <td className={`${cellClass} w-[40px]`}>
-          <button
-            type="button"
-            onClick={() => setShowDelete(true)}
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-            title="학생 삭제"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </td>
-      </tr>
-
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
-              <h2 className="text-lg font-bold text-gray-900">{data.name} 학생 상담 이력</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-500 hover:text-gray-700"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-4 border-b border-gray-200">
-              <label className="block text-sm font-semibold text-gray-800 mb-1">학생 특징 / 상담 요약</label>
-              <textarea
-                value={inlineProfile}
-                onChange={(e) => setInlineProfile(e.target.value)}
-                onBlur={() => {
-                  if (inlineProfile !== (data.profile || '')) onSave({ ...data, profile: inlineProfile });
-                }}
-                className="w-full min-h-[120px] border border-amber-200 bg-amber-50/60 rounded-lg p-3 text-sm text-gray-800 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:bg-white resize-y leading-relaxed"
+        <>
+            <td className={`${cellClass} ${stickyAction} ${isProspectBoard ? 'right-[112px]' : 'right-10'} w-[220px] !border-0 z-[1]`}>
+              <JournalButton
+                ref={journalRef}
+                summary={journalSummary}
+                onClick={() => onOpenJournal?.(journalRef.current)}
               />
-            </div>
-            <div className="p-4 border-b border-gray-200 bg-blue-50/50">
-              <h3 className="text-sm font-semibold text-blue-900 mb-2">새로운 상담 기록 추가</h3>
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
-                  <div className="w-[120px] border border-gray-300 rounded bg-white">
-                    <DatePickerCell value={newDate} onChange={setNewDate} />
-                  </div>
-                  <select value={modalNewMethod} onChange={e => setModalNewMethod(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 outline-none focus:ring-1 focus:ring-blue-500">
-                    <option>일반 전화</option>
-                    <option>카카오톡 보이스톡</option>
-                    <option>카카오톡</option>
-                    <option>왓츠앱</option>
-                    <option>직접 방문</option>
-                  </select>
-                </div>
-                <textarea placeholder="상담 내용을 입력하세요..." value={modalNewNote} onChange={(e) => setModalNewNote(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[80px]" />
-                <div className="flex justify-end">
-                  <button onClick={handleAddNoteFromModal} disabled={!modalNewNote.trim()} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors">기록 추가</button>
-                </div>
-              </div>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1">
-              <div className="space-y-4">
-                {[...data.notes].map((note, originalIndex) => ({ note, originalIndex })).reverse().map(({ note, originalIndex }) => (
-                  <div key={originalIndex} className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-sm text-gray-800">{note.date}</span>
-                      <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">{note.method}</span>
-                    </div>
-                    <div className="relative bg-gray-50 p-3 pr-8 rounded-lg border border-gray-200 text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">
-                      <button
-                        type="button"
-                        onClick={() => setNoteDeleteIndex(originalIndex)}
-                        className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-200/70 transition-colors"
-                        title="상담 기록 삭제"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                      {note.content}
-                    </div>
-                  </div>
-                ))}
-                {data.notes.length === 0 && <div className="text-center text-gray-500 py-8">상담 이력이 없습니다.</div>}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </td>
+            {isProspectBoard && (
+              <td className={`${cellClass} ${stickyAction} right-10 w-[72px] !border-0 z-[1]`}>
+                <button
+                  type="button"
+                  onClick={openConvert}
+                  className="h-7 px-0 text-[12px] font-normal text-emerald-700 hover:text-emerald-800 transition-colors"
+                >
+                  등록
+                </button>
+              </td>
+            )}
+            <td className={`${cellClass} ${stickyAction} right-0 z-[1] w-10 !border-0`}>
+              <button
+                ref={moreBtnRef}
+                type="button"
+                onClick={() => {
+                  setMenuRect(moreBtnRef.current?.getBoundingClientRect() ?? null);
+                  setMenuOpen((open) => !open);
+                }}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-sm text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
+                title="더보기"
+                aria-label="더보기"
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+              {menuOpen && createPortal(
+                <div
+                  ref={menuRef}
+                  style={{
+                    position: 'fixed',
+                    top: (menuRect?.bottom ?? 0) + 4,
+                    right: Math.max(12, window.innerWidth - (menuRect?.right ?? 0)),
+                    zIndex: 80,
+                  }}
+                  className="min-w-[120px] bg-white border border-neutral-200 rounded-md shadow-lg py-1"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setShowDelete(true);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-[13px] text-red-600 hover:bg-neutral-50"
+                  >
+                    삭제
+                  </button>
+                </div>,
+                document.body
+              )}
+            </td>
+        </>
+      </tr>
 
       {showConvert && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -504,23 +492,6 @@ export const EditableRow: React.FC<EditableRowProps> = ({
             <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-lg">
               <button onClick={() => setShowConvert(false)} className="px-4 py-1.5 rounded text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors">취소</button>
               <button onClick={confirmConvert} className="px-4 py-1.5 rounded text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 transition-colors">원생으로 등록</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {noteDeleteIndex !== null && (
-        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col">
-            <div className="p-4 border-b border-gray-200">
-              <h2 className="text-base font-semibold text-gray-800">상담 기록 삭제</h2>
-            </div>
-            <div className="p-4 text-sm text-gray-700 leading-relaxed">
-              이 상담 기록을 삭제하시겠습니까?
-            </div>
-            <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-lg">
-              <button onClick={() => setNoteDeleteIndex(null)} className="px-4 py-1.5 rounded text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors">취소</button>
-              <button onClick={confirmDeleteNote} className="px-4 py-1.5 rounded text-sm font-medium text-white bg-gray-700 hover:bg-gray-800 transition-colors">삭제</button>
             </div>
           </div>
         </div>
