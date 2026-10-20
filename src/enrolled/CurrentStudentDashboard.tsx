@@ -208,7 +208,7 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden border border-neutral-200 bg-white">
         <div className="flex-1 overflow-auto">
           <div style={{ minWidth: STUDENT_TABLE_MIN_WIDTH }}>
-            <div className="sticky top-0 z-20 bg-white">
+            <div className="sticky top-0 z-20 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
               <table className="w-full table-fixed border-collapse text-left">
                 <StudentColgroup />
                 <StudentTableHeader

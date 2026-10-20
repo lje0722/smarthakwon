@@ -12,11 +12,14 @@ interface GradeSummaryFilterProps {
 
 const boxClass = (active: boolean) =>
   [
-    'min-w-[148px] rounded-md border px-3 py-2 text-left transition-colors',
+    'min-w-[148px] rounded-md border px-3 py-2.5 text-left transition-colors',
     active
       ? 'border-neutral-800 bg-white'
       : 'border-neutral-200 bg-white hover:border-neutral-300',
   ].join(' ');
+
+const seatEmphasisClass = (seats: number): string =>
+  seats < 0 ? 'text-red-600' : seats === 0 ? 'text-amber-600' : 'text-neutral-900';
 
 export const GradeSummaryFilter: React.FC<GradeSummaryFilterProps> = ({
   items,
@@ -33,8 +36,11 @@ export const GradeSummaryFilter: React.FC<GradeSummaryFilterProps> = ({
       className={boxClass(selected === 'all')}
     >
       <div className="text-[12px] font-medium text-neutral-500">전체</div>
-      <div className="mt-1 text-[13px] text-neutral-800 whitespace-nowrap">
-        반 {totalClasses}개 · 원생 {totalStudents}명 · {totalRemaining}석
+      <div className="mt-1 text-[12px] text-neutral-500 whitespace-nowrap">
+        반 {totalClasses}개 · 원생 {totalStudents}명
+      </div>
+      <div className={`text-[18px] font-bold leading-tight whitespace-nowrap ${seatEmphasisClass(totalRemaining)}`}>
+        잔여 {totalRemaining}석
       </div>
     </button>
     {items.map((item) => {
@@ -47,8 +53,11 @@ export const GradeSummaryFilter: React.FC<GradeSummaryFilterProps> = ({
           className={boxClass(active)}
         >
           <div className="text-[12px] font-medium text-neutral-500">{item.label}</div>
-          <div className="mt-1 text-[13px] text-neutral-800 whitespace-nowrap">
-            반 {item.classCount}개 · 원생 {item.studentCount}명 · {item.remainingSeats}석
+          <div className="mt-1 text-[12px] text-neutral-500 whitespace-nowrap">
+            반 {item.classCount}개 · 원생 {item.studentCount}명
+          </div>
+          <div className={`text-[18px] font-bold leading-tight whitespace-nowrap ${seatEmphasisClass(item.remainingSeats)}`}>
+            잔여 {item.remainingSeats}석
           </div>
         </button>
       );

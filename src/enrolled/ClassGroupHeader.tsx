@@ -16,6 +16,14 @@ const seatTone = (group: ClassRosterGroup): string => {
   return 'text-amber-800 bg-amber-50';
 };
 
+/** 반 띠 좌측 색상 — 같은 회색 톤이 쭉 이어지는 걸 깨서, 자리 상태를 훑어보기(색으로 찾기) 쉽게 한다. */
+const bandAccentClass = (group: ClassRosterGroup): string => {
+  if (group.classInfo.unassigned) return 'border-l-neutral-300';
+  if (group.remainingSeats < 0) return 'border-l-amber-400';
+  if (group.remainingSeats === 0) return 'border-l-neutral-300';
+  return 'border-l-emerald-400';
+};
+
 export const ClassGroupHeader: React.FC<ClassGroupHeaderProps> = ({
   group,
   collapsed,
@@ -23,24 +31,36 @@ export const ClassGroupHeader: React.FC<ClassGroupHeaderProps> = ({
 }) => {
   const { classInfo, currentCount } = group;
   const badge = seatBadgeText(group);
-  const meta = [classInfo.teacher, classInfo.days, classInfo.time]
-    .filter((part) => part && part !== '-')
-    .join(' · ');
 
   return (
     <button
       type="button"
       onClick={onToggle}
-      className="sticky top-10 z-[15] flex w-full items-center gap-3 border-y border-neutral-200 bg-[#f3f3f1] px-3 py-2 text-left"
+      className={`sticky top-10 z-[15] flex w-full items-center gap-3 border-t border-b border-t-neutral-200 border-b-neutral-200 border-l-4 ${bandAccentClass(group)} bg-[#f3f3f1] px-3 py-2.5 text-left`}
     >
       {collapsed
         ? <ChevronRight className="h-4 w-4 shrink-0 text-neutral-500" />
         : <ChevronDown className="h-4 w-4 shrink-0 text-neutral-500" />}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[14px] font-medium text-neutral-900">{classInfo.name}</div>
-        <div className="truncate text-[12px] text-neutral-500">
-          {meta || (classInfo.unassigned ? '수강반 미배정' : '')}
-        </div>
+        <div className="truncate text-[15px] font-semibold text-neutral-900">{classInfo.name}</div>
+        {classInfo.unassigned ? (
+          <div className="mt-0.5 text-[12px] text-neutral-400">수강반 미배정</div>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12px]">
+            <span>
+              <span className="text-[10px] text-neutral-400">담당 </span>
+              <span className="font-semibold text-neutral-800">{classInfo.teacher !== '-' ? classInfo.teacher : '미정'}</span>
+            </span>
+            <span>
+              <span className="text-[10px] text-neutral-400">요일 </span>
+              <span className="font-semibold text-neutral-800">{classInfo.days}</span>
+            </span>
+            <span>
+              <span className="text-[10px] text-neutral-400">시간 </span>
+              <span className="font-semibold text-neutral-800">{classInfo.time}</span>
+            </span>
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-2 text-[12px]">
         <span className="text-neutral-600">

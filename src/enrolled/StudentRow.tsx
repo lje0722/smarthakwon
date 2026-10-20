@@ -30,7 +30,7 @@ interface StudentRowProps {
 }
 
 const gradeSelectClass =
-  'w-full h-7 px-0 text-[13px] text-left bg-transparent border-0 outline-none appearance-none cursor-pointer';
+  'w-full h-7 px-0 text-[13px] text-center bg-transparent border-0 outline-none appearance-none cursor-pointer';
 
 const GradeSelect: React.FC<{
   value: string;
@@ -69,7 +69,7 @@ export const StudentRow: React.FC<StudentRowProps> = ({
   const { dropEdge, setDropEdge, dragging, setDragging } = useRowDropEdge();
   const fill = rowFillClass({ dragging, selected, searchHit: highlighted });
   const line = dropLineClass(dropEdge);
-  const cell = `border-b border-neutral-100 px-3 h-11 ${line}`;
+  const cell = `border-b border-neutral-100 px-3 h-11 text-center ${line}`;
   const sticky = `sticky z-[1] ${fill}`;
 
   return (
@@ -120,13 +120,13 @@ export const StudentRow: React.FC<StudentRowProps> = ({
           {shortStudentNum(student.studentNumber)}
         </td>
         <td
-          className={`sticky left-[72px] ${sticky} ${cell} text-[14px] font-medium text-neutral-900 max-w-[128px]`}
+          className={`sticky left-[80px] ${sticky} ${cell} text-[14px] font-medium text-neutral-900 max-w-[132px]`}
           title={student.name}
         >
-          <span className="block truncate">{student.name || '-'}</span>
+          <span className="block truncate text-center">{student.name || '-'}</span>
         </td>
-        <td className={`${cell} text-[13px] text-neutral-600 max-w-[140px]`} title={student.school}>
-          <span className="block truncate">{student.school || '-'}</span>
+        <td className={`${cell} text-[13px] text-neutral-600 max-w-[148px]`} title={student.school}>
+          <span className="block truncate text-center">{student.school || '-'}</span>
         </td>
         <td className={`${cell} align-middle`}>
           <GradeSelect
@@ -135,13 +135,10 @@ export const StudentRow: React.FC<StudentRowProps> = ({
           />
         </td>
         <td className={`${cell} align-middle`}>
-          <GradeSelect
-            value={student.evalGrade || ''}
-            onChange={(evalGrade) => onSave({ ...student, evalGrade })}
-          />
-        </td>
-        <td className={`${cell} align-middle`}>
           <LearningStatusCell status={status} />
+        </td>
+        <td className={`${cell} px-2`}>
+          <LessonLogButton studentId={student.id} onMessage={onMessage} />
         </td>
         <td className={`${cell} !border-0`}>
           <JournalButton
@@ -149,9 +146,6 @@ export const StudentRow: React.FC<StudentRowProps> = ({
             summary={summary}
             onClick={() => onOpenJournal(student, journalRef.current)}
           />
-        </td>
-        <td className={`${cell} px-2`}>
-          <LessonLogButton studentId={student.id} onMessage={onMessage} />
         </td>
         <td className={`${cell} px-1`}>
           <StudentMoreMenu onAction={onAction} />
