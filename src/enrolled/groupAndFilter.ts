@@ -69,6 +69,9 @@ export const buildRosterGroups = (
   }
 
   return [...byId.values()].sort((a, b) => {
+    const aSpecial = a.classInfo.unassigned || a.classInfo.isOneOnOne;
+    const bSpecial = b.classInfo.unassigned || b.classInfo.isOneOnOne;
+    if (aSpecial !== bSpecial) return aSpecial ? 1 : -1;
     const grade = gradeSortValue(b.classInfo.gradeKey) - gradeSortValue(a.classInfo.gradeKey);
     if (grade !== 0) return grade;
     if (a.classInfo.unassigned !== b.classInfo.unassigned) return a.classInfo.unassigned ? 1 : -1;

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Consultation } from '../types';
+import type { Consultation, SortOrder } from '../types';
 import type { ClassRosterGroup, LearningStatus, StudentAction } from './types';
 import { ClassGroupHeader } from './ClassGroupHeader';
 import { StudentTable } from './StudentTable';
@@ -10,6 +10,8 @@ interface ClassGroupProps {
   selectedId: string | null;
   onToggle: () => void;
   statusById: Record<string, LearningStatus>;
+  journalSort?: SortOrder | null;
+  onSortJournal?: () => void;
   onSave: (student: Consultation) => void;
   onMessage: (message: string) => void;
   onAction: (student: Consultation, action: StudentAction) => void;
@@ -24,6 +26,8 @@ export const ClassGroup: React.FC<ClassGroupProps> = ({
   selectedId,
   onToggle,
   statusById,
+  journalSort,
+  onSortJournal,
   onSave,
   onMessage,
   onAction,
@@ -39,6 +43,8 @@ export const ClassGroup: React.FC<ClassGroupProps> = ({
         matchedStudentIds={group.matchedStudentIds}
         statusById={statusById}
         selectedId={selectedId}
+        journalSort={journalSort}
+        onSortJournal={onSortJournal}
         onSave={onSave}
         onMessage={onMessage}
         onAction={onAction}

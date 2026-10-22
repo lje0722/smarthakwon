@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { seatBadgeText } from './groupAndFilter';
+import { gradeAccentColor } from './classCatalog';
 import type { ClassRosterGroup } from './types';
 
 interface ClassGroupHeaderProps {
@@ -16,14 +17,6 @@ const seatTone = (group: ClassRosterGroup): string => {
   return 'text-amber-800 bg-amber-50';
 };
 
-/** 반 띠 좌측 색상 — 같은 회색 톤이 쭉 이어지는 걸 깨서, 자리 상태를 훑어보기(색으로 찾기) 쉽게 한다. */
-const bandAccentClass = (group: ClassRosterGroup): string => {
-  if (group.classInfo.unassigned) return 'border-l-neutral-300';
-  if (group.remainingSeats < 0) return 'border-l-amber-400';
-  if (group.remainingSeats === 0) return 'border-l-neutral-300';
-  return 'border-l-emerald-400';
-};
-
 export const ClassGroupHeader: React.FC<ClassGroupHeaderProps> = ({
   group,
   collapsed,
@@ -36,7 +29,8 @@ export const ClassGroupHeader: React.FC<ClassGroupHeaderProps> = ({
     <button
       type="button"
       onClick={onToggle}
-      className={`sticky top-10 z-[15] flex w-full items-center gap-3 border-t border-b border-t-neutral-200 border-b-neutral-200 border-l-4 ${bandAccentClass(group)} bg-[#f3f3f1] px-3 py-2.5 text-left`}
+      className="sticky top-0 z-[30] flex min-h-16 w-full items-center gap-3 border-t border-b border-t-neutral-200 border-b-neutral-200 border-l-4 bg-[#f3f3f1] px-3 py-2.5 text-left shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
+      style={{ borderLeftColor: gradeAccentColor(classInfo.gradeKey) }}
     >
       {collapsed
         ? <ChevronRight className="h-4 w-4 shrink-0 text-neutral-500" />

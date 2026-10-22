@@ -18,7 +18,7 @@ import { EMPTY_DASHBOARD_FILTERS } from './types';
 import { ClassGroup } from './ClassGroup';
 import { DashboardFilters } from './DashboardFilters';
 import { GradeSummaryFilter } from './GradeSummaryFilter';
-import { StudentColgroup, StudentTableHeader, STUDENT_TABLE_MIN_WIDTH } from './StudentTable';
+import { STUDENT_TABLE_MIN_WIDTH } from './StudentTable';
 
 interface CurrentStudentDashboardProps {
   students: Consultation[];
@@ -208,15 +208,6 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden border border-neutral-200 bg-white">
         <div className="flex-1 overflow-auto">
           <div style={{ minWidth: STUDENT_TABLE_MIN_WIDTH }}>
-            <div className="sticky top-0 z-20 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
-              <table className="w-full table-fixed border-collapse text-left">
-                <StudentColgroup />
-                <StudentTableHeader
-                  journalSort={journalSort}
-                  onSortJournal={() => setJournalSort((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-                />
-              </table>
-            </div>
             {visibleGroups.length > 0 ? (
               visibleGroups.map((group) => (
                 <ClassGroup
@@ -229,6 +220,8 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
                     [group.classInfo.id]: !prev[group.classInfo.id],
                   }))}
                   statusById={statusById}
+                  journalSort={journalSort}
+                  onSortJournal={() => setJournalSort((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
                   onSave={onSave}
                   onMessage={setMessage}
                   onAction={openAction}

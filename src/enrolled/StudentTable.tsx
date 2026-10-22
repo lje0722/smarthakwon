@@ -20,26 +20,31 @@ export const StudentColgroup: React.FC = () => (
   </colgroup>
 );
 
+const headCell =
+  'sticky top-16 z-[16] border-b border-neutral-200 bg-white px-3 text-center whitespace-nowrap shadow-[0_1px_3px_rgba(0,0,0,0.06)]';
+const headCellFrozen =
+  'sticky top-16 z-[26] border-b border-neutral-200 bg-white px-3 text-center whitespace-nowrap shadow-[0_1px_3px_rgba(0,0,0,0.06)]';
+
 export const StudentTableHeader: React.FC<{
   journalSort?: SortOrder | null;
   onSortJournal?: () => void;
 }> = ({ journalSort, onSortJournal }) => (
-  <thead className="bg-white text-[12px] font-medium text-neutral-500">
-    <tr className="h-10 border-b border-neutral-200">
-      <th className="sticky left-0 z-[21] bg-white px-3 text-center whitespace-nowrap">학생번호</th>
-      <th className="sticky left-[80px] z-[21] bg-white px-3 text-center whitespace-nowrap">이름</th>
-      <th className="px-3 text-center whitespace-nowrap">학교</th>
-      <th className="px-3 text-center whitespace-nowrap">학년</th>
-      <th className="px-3 text-center whitespace-nowrap">이해도</th>
-      <th className="px-2 text-center whitespace-nowrap">수업 로그</th>
+  <thead className="text-[12px] font-medium text-neutral-500">
+    <tr className="h-10">
+      <th className={`sticky left-0 ${headCellFrozen}`}>학생번호</th>
+      <th className={`sticky left-[80px] ${headCellFrozen}`}>이름</th>
+      <th className={headCell}>학교</th>
+      <th className={headCell}>학년</th>
+      <th className={headCell}>학습상태</th>
+      <th className={`${headCell} px-2`}>수업 로그</th>
       <th
-        className={`px-3 text-center whitespace-nowrap ${onSortJournal ? 'cursor-pointer hover:text-neutral-800' : ''}`}
+        className={`${headCell} ${onSortJournal ? 'cursor-pointer hover:text-neutral-800' : ''}`}
         onClick={onSortJournal}
         aria-sort={journalSort === 'desc' ? 'descending' : journalSort === 'asc' ? 'ascending' : 'none'}
       >
         <div className="flex items-center justify-center gap-1">상담일지 {onSortJournal && <ArrowUpDown className="h-3 w-3 opacity-50" />}</div>
       </th>
-      <th className="px-1" aria-label="더보기" />
+      <th className={`${headCell} px-1`} aria-label="더보기" />
     </tr>
   </thead>
 );
@@ -49,6 +54,8 @@ interface StudentTableProps {
   matchedStudentIds: string[];
   statusById: Record<string, LearningStatus>;
   selectedId: string | null;
+  journalSort?: SortOrder | null;
+  onSortJournal?: () => void;
   onSave: (student: Consultation) => void;
   onMessage: (message: string) => void;
   onAction: (student: Consultation, action: StudentAction) => void;
@@ -62,6 +69,8 @@ export const StudentTable: React.FC<StudentTableProps> = ({
   matchedStudentIds,
   statusById,
   selectedId,
+  journalSort,
+  onSortJournal,
   onSave,
   onMessage,
   onAction,
@@ -71,6 +80,7 @@ export const StudentTable: React.FC<StudentTableProps> = ({
 }) => (
   <table className="w-full table-fixed border-collapse text-center" style={{ minWidth: STUDENT_TABLE_MIN_WIDTH }}>
     <StudentColgroup />
+    <StudentTableHeader journalSort={journalSort} onSortJournal={onSortJournal} />
     <tbody>
       {students.map((student) => (
         <StudentRow

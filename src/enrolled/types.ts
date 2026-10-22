@@ -18,6 +18,7 @@ export interface OperatingClass {
   time: string;
   capacity: number;
   unassigned: boolean;
+  isOneOnOne: boolean;
 }
 
 export type SeatFilter = 'all' | 'open' | 'full';

@@ -28,6 +28,34 @@ export const gradeSortValue = (key: string): number => {
   return -1;
 };
 
+/**
+ * 학년 밴드 색상 — 이웃 학년(G11/G12 등)도 한눈에 구분되도록 톤 하나를 진하게 이어가는
+ * 대신, 서로 다른 색상(hue)을 고정 순서로 배정한다. G5를 시작점으로 둔다.
+ */
+const GRADE_ACCENT_PALETTE = [
+  '#2a78d6', // blue
+  '#eb6834', // orange
+  '#1baf7a', // aqua
+  '#eda100', // yellow
+  '#e87ba4', // magenta
+  '#008300', // green
+  '#4a3aa7', // violet
+  '#e34948', // red
+];
+const GRADE_ACCENT_BASE = 5;
+const GRADE_ACCENT_FALLBACK = '#c3c2b7';
+
+/** 같은 학년이면 항상 같은 색이 나오도록, 학년 숫자를 팔레트의 고정 위치에 매핑한다. */
+export const gradeAccentColor = (gradeKey: string): string => {
+  const match = gradeKey.match(/^G(\d{1,2})$/i);
+  if (!match) return GRADE_ACCENT_FALLBACK;
+  const index = Math.min(
+    Math.max(Number(match[1]) - GRADE_ACCENT_BASE, 0),
+    GRADE_ACCENT_PALETTE.length - 1
+  );
+  return GRADE_ACCENT_PALETTE[index];
+};
+
 const hashString = (value: string): number => {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) {
@@ -48,9 +76,12 @@ const teacherFromName = (className: string): string => {
   return withMatch ? withMatch[1] : '-';
 };
 
+export const isOneOnOneClassName = (className: string): boolean =>
+  /1\s*:\s*1|1대1|1대 1/i.test(className);
+
 const mockCapacity = (className: string, unassigned: boolean): number => {
   if (unassigned) return 0;
-  if (/1\s*:\s*1|1대1|1대 1/i.test(className)) return 1;
+  if (isOneOnOneClassName(className)) return 1;
   return 8 + (hashString(className) % 5);
 };
 
@@ -92,6 +123,7 @@ export const buildOperatingClass = (
     time: schedule.time,
     capacity: mockCapacity(className, unassigned),
     unassigned,
+    isOneOnOne: !unassigned && isOneOnOneClassName(className),
   };
 };
 
