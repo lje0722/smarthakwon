@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatRequestTime } from './format';
 import { useRequests } from './RequestContext';
 import { sortDoneRequests, sortOpenRequests } from './selectors';
-import { PRIORITY_LABEL, type RequestPriority, type StudentRequest } from './types';
+import { PRIORITY_LABEL, type RequestAction, type RequestPriority, type StudentRequest } from './types';
 
 interface RequestPanelProps {
   studentId: string;
@@ -23,17 +23,21 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({ studentId, onDirtyCh
     addRequest,
     updateContent,
     updatePriority,
+    updateAction,
     completeRequest,
     reopenRequest,
     pending,
     persistence,
     loadError,
+    actionOptions,
   } = useRequests();
   const requests = requestsFor(studentId);
   const openRows = sortOpenRequests(requests);
   const doneRows = sortDoneRequests(requests);
+  const fallbackAction = actionOptions[0] ?? '기타';
 
   const [draft, setDraft] = useState('');
+  const [action, setAction] = useState<RequestAction>(fallbackAction);
   const [priority, setPriority] = useState<RequestPriority>('normal');
   const [error, setError] = useState<string | null>(null);
   const [doneOpen, setDoneOpen] = useState(false);
@@ -77,9 +81,10 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({ studentId, onDirtyCh
     const content = draft.trim();
     if (!content || pending) return;
     void run(async () => {
-      await addRequest(studentId, content, priority);
+      await addRequest(studentId, content, priority, action);
       setDraft('');
       setPriority('normal');
+      setAction(fallbackAction);
     }).catch(() => {});
   };
 
@@ -94,13 +99,29 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({ studentId, onDirtyCh
       {loadError && <p className="mb-2 text-[12px] text-red-600">{loadError}</p>}
 
       <div className="mb-3 rounded-md border border-neutral-200 bg-neutral-50/80 p-3">
+        <label className="mb-1 block text-[12px] font-medium text-neutral-600">Action 선택</label>
+        <select
+          value={action}
+          onChange={(event) => setAction(event.target.value as RequestAction)}
+          className="mb-3 w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+          {actionOptions.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+
+        <label className="mb-1 block text-[12px] font-medium text-neutral-600">요청 내용</label>
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="전화·카카오톡으로 들어온 요청을 적어 주세요"
+          placeholder="예: 원장님께 반 이동 가능 여부 확인 후 학부모에게 연락"
           className="min-h-[72px] w-full resize-y rounded border border-neutral-300 bg-white p-2 text-sm text-neutral-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
         />
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+
+        <p className="mt-3 mb-1 text-[12px] font-medium text-neutral-600">우선순위</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex gap-1.5">
             {(['normal', 'urgent'] as const).map((value) => (
               <button
@@ -144,7 +165,12 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({ studentId, onDirtyCh
               if (next === row.priority) return Promise.resolve();
               return run(() => updatePriority(row.id, next));
             }}
+            onAction={(next) => {
+              if (next === row.action) return Promise.resolve();
+              return run(() => updateAction(row.id, next));
+            }}
             onComplete={() => run(() => completeRequest(row.id))}
+            actionOptions={actionOptions}
           />
         ))}
       </div>
@@ -164,6 +190,9 @@ export const RequestPanel: React.FC<RequestPanelProps> = ({ studentId, onDirtyCh
               {doneRows.map((row) => (
                 <div key={row.id} className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
                   <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
+                    <span className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-neutral-600">
+                      {row.action}
+                    </span>
                     <span className={row.priority === 'urgent' ? 'text-red-600' : 'text-emerald-700'}>
                       {PRIORITY_LABEL[row.priority]}
                     </span>
@@ -196,7 +225,9 @@ interface RequestRowProps {
   onDirty: (dirty: boolean) => void;
   onCommitContent: (content: string) => Promise<void>;
   onPriority: (priority: RequestPriority) => Promise<void>;
+  onAction: (action: RequestAction) => Promise<void>;
   onComplete: () => Promise<void>;
+  actionOptions: string[];
 }
 
 const RequestRow: React.FC<RequestRowProps> = ({
@@ -205,7 +236,9 @@ const RequestRow: React.FC<RequestRowProps> = ({
   onDirty,
   onCommitContent,
   onPriority,
+  onAction,
   onComplete,
+  actionOptions,
 }) => {
   const [text, setText] = useState(row.content);
   const textRef = useRef(text);
@@ -236,6 +269,9 @@ const RequestRow: React.FC<RequestRowProps> = ({
   return (
     <div className="rounded-md border border-neutral-200 bg-white px-3 py-2">
       <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
+        <span className="rounded border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 text-neutral-600">
+          {row.action}
+        </span>
         <span className={row.priority === 'urgent' ? 'font-medium text-red-600' : 'font-medium text-emerald-700'}>
           {PRIORITY_LABEL[row.priority]}
         </span>
@@ -252,6 +288,29 @@ const RequestRow: React.FC<RequestRowProps> = ({
         className="min-h-[48px] w-full resize-y rounded border border-transparent bg-transparent p-1 -mx-1 text-[13px] leading-relaxed text-neutral-800 outline-none hover:border-neutral-200 focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
       />
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <select
+          value={row.action}
+          disabled={pending}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(event) => {
+            const value = event.target.value as RequestAction;
+            void (async () => {
+              try {
+                await commitText();
+                await onAction(value);
+              } catch {
+                /* 오류는 요청 패널에 표시 */
+              }
+            })();
+          }}
+          className="h-6 rounded border border-neutral-200 bg-white px-1.5 text-[11px] text-neutral-600 outline-none disabled:opacity-50"
+        >
+          {actionOptions.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
         {(['normal', 'urgent'] as const).map((value) => (
           <button
             key={value}

@@ -2,7 +2,14 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { getCurrentUserName } from './currentUser';
 import { REQUEST_PERSISTENCE, requestRepository } from './repository';
 import { buildOpenSummaryMap } from './selectors';
-import { emptyOpenSummary, type OpenRequestSummary, type RequestPriority, type StudentRequest } from './types';
+import {
+  DEFAULT_REQUEST_ACTIONS,
+  emptyOpenSummary,
+  type OpenRequestSummary,
+  type RequestAction,
+  type RequestPriority,
+  type StudentRequest,
+} from './types';
 
 interface RequestContextValue {
   requests: StudentRequest[];
@@ -10,14 +17,19 @@ interface RequestContextValue {
   persistence: 'browser' | 'server';
   loadError: string | null;
   pending: boolean;
-  addRequest: (studentId: string, content: string, priority: RequestPriority) => Promise<void>;
+  addRequest: (studentId: string, content: string, priority: RequestPriority, action: RequestAction) => Promise<void>;
   updateContent: (id: string, content: string) => Promise<void>;
   updatePriority: (id: string, priority: RequestPriority) => Promise<void>;
+  updateAction: (id: string, action: RequestAction) => Promise<void>;
   completeRequest: (id: string) => Promise<void>;
   reopenRequest: (id: string) => Promise<void>;
   requestsFor: (studentId: string) => StudentRequest[];
   openSummary: (studentId: string) => OpenRequestSummary;
   openSummaryMap: Record<string, OpenRequestSummary>;
+  actionOptions: string[];
+  addActionOption: (label: string) => void;
+  renameActionOption: (oldLabel: string, newLabel: string) => void;
+  removeActionOption: (label: string) => void;
 }
 
 const RequestContext = createContext<RequestContextValue | null>(null);
@@ -32,6 +44,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [actionOptions, setActionOptions] = useState<string[]>(DEFAULT_REQUEST_ACTIONS);
   const requestsRef = useRef(requests);
   const pendingRef = useRef(false);
   requestsRef.current = requests;
@@ -71,11 +84,12 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  const addRequest = useCallback(async (studentId: string, content: string, priority: RequestPriority) => {
+  const addRequest = useCallback(async (studentId: string, content: string, priority: RequestPriority, action: RequestAction) => {
     const now = new Date().toISOString();
     const row: StudentRequest = {
       id: newId(),
       studentId,
+      action,
       content,
       priority,
       status: 'open',
@@ -100,6 +114,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await patchRequest(id, { priority });
   }, [patchRequest]);
 
+  const updateAction = useCallback(async (id: string, action: RequestAction) => {
+    await patchRequest(id, { action });
+  }, [patchRequest]);
+
   const completeRequest = useCallback(async (id: string) => {
     await patchRequest(id, {
       status: 'done',
@@ -115,6 +133,26 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
       completedBy: null,
     });
   }, [patchRequest]);
+
+  const addActionOption = useCallback((label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    setActionOptions((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+  }, []);
+
+  const renameActionOption = useCallback((oldLabel: string, newLabel: string) => {
+    const trimmed = newLabel.trim();
+    if (!trimmed || trimmed === oldLabel) return;
+    setActionOptions((prev) => prev.map((option) => (option === oldLabel ? trimmed : option)));
+    const next = requestsRef.current.map((row) => (row.action === oldLabel ? { ...row, action: trimmed } : row));
+    if (next.some((row, index) => row !== requestsRef.current[index])) {
+      void persist(next).catch(() => {});
+    }
+  }, [persist]);
+
+  const removeActionOption = useCallback((label: string) => {
+    setActionOptions((prev) => prev.filter((option) => option !== label));
+  }, []);
 
   const byStudent = useMemo(() => {
     const map: Record<string, StudentRequest[]> = {};
@@ -135,14 +173,20 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addRequest,
     updateContent,
     updatePriority,
+    updateAction,
     completeRequest,
     reopenRequest,
     requestsFor: (studentId) => byStudent[studentId] ?? [],
     openSummary: (studentId) => openSummaryMap[studentId] ?? emptyOpenSummary(),
     openSummaryMap,
+    actionOptions,
+    addActionOption,
+    renameActionOption,
+    removeActionOption,
   }), [
-    requests, ready, loadError, pending, addRequest, updateContent, updatePriority,
+    requests, ready, loadError, pending, addRequest, updateContent, updatePriority, updateAction,
     completeRequest, reopenRequest, byStudent, openSummaryMap,
+    actionOptions, addActionOption, renameActionOption, removeActionOption,
   ]);
 
   return <RequestContext.Provider value={value}>{children}</RequestContext.Provider>;

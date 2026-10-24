@@ -136,10 +136,3 @@ export const buildClassCatalog = (students: Consultation[]): OperatingClass[] =>
   }
   return [...byId.values()];
 };
-
-export const listTeachers = (classes: OperatingClass[]): string[] => {
-  const names = classes
-    .map((item) => item.teacher)
-    .filter((name) => name && name !== '-');
-  return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'ko'));
-};

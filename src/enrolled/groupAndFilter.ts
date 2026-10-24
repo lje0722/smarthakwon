@@ -3,7 +3,6 @@ import { buildClassCatalog, buildOperatingClass, gradeSortValue } from './classC
 import type {
   ClassRosterGroup,
   DashboardFilterState,
-  GradeSummaryItem,
   OperatingClass,
 } from './types';
 
@@ -77,30 +76,6 @@ export const buildRosterGroups = (
     if (a.classInfo.unassigned !== b.classInfo.unassigned) return a.classInfo.unassigned ? 1 : -1;
     return a.classInfo.name.localeCompare(b.classInfo.name, 'ko');
   });
-};
-
-export const summarizeGrades = (groups: ClassRosterGroup[]): GradeSummaryItem[] => {
-  const byGrade = new Map<string, GradeSummaryItem>();
-  for (const group of groups) {
-    const key = group.classInfo.gradeKey;
-    const current = byGrade.get(key) ?? {
-      key,
-      label: key,
-      classCount: 0,
-      studentCount: 0,
-      remainingSeats: 0,
-    };
-    current.classCount += 1;
-    current.studentCount += group.currentCount;
-    if (!group.classInfo.unassigned) {
-      current.remainingSeats += Math.max(0, group.remainingSeats);
-    }
-    byGrade.set(key, current);
-  }
-
-  return [...byGrade.values()].sort(
-    (a, b) => gradeSortValue(b.key) - gradeSortValue(a.key) || a.key.localeCompare(b.key, 'ko')
-  );
 };
 
 export const filterRosterGroups = (

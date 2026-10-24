@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { Consultation } from '../types';
 import { GRADE_OPTIONS, type SortOrder } from '../types';
-import { buildClassCatalog, listTeachers, gradeSortValue } from './classCatalog';
-import { buildRosterGroups, compareStudents, filterRosterGroups, summarizeGrades } from './groupAndFilter';
+import { buildClassCatalog, gradeSortValue } from './classCatalog';
+import { buildRosterGroups, compareStudents, filterRosterGroups } from './groupAndFilter';
 import { loadLearningStatusMap } from './learningStatus';
 import { applyIdOrder, reorderSubset } from '../components/rowDrag';
 import { NotesModal } from '../components/NotesModal';
@@ -10,15 +11,18 @@ import { useRequests } from '../requests/RequestContext';
 import { compareByOpenRequests, compareStudentsByOpenRequests, mergeOpenSummaries } from '../requests/selectors';
 import { emptyOpenSummary } from '../requests/types';
 import type {
-  DashboardFilterState,
   LearningStatus,
   StudentAction,
 } from './types';
 import { EMPTY_DASHBOARD_FILTERS } from './types';
 import { ClassGroup } from './ClassGroup';
-import { DashboardFilters } from './DashboardFilters';
-import { GradeSummaryFilter } from './GradeSummaryFilter';
 import { STUDENT_TABLE_MIN_WIDTH } from './StudentTable';
+
+const actionCardClass = (active: boolean) =>
+  [
+    'rounded-md border px-3 py-2 flex flex-col justify-center cursor-pointer transition-colors text-left',
+    active ? 'border-neutral-800 bg-white' : 'border-neutral-200 bg-white hover:border-neutral-300',
+  ].join(' ');
 
 interface CurrentStudentDashboardProps {
   students: Consultation[];
@@ -26,7 +30,6 @@ interface CurrentStudentDashboardProps {
   schoolOptions: string[];
   onSave: (student: Consultation) => void;
   searchTerm?: string;
-  onResetSearch?: () => void;
   classOrder?: Record<string, string[]>;
   onClassOrderChange?: (next: Record<string, string[]>) => void;
 }
@@ -42,13 +45,11 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
   schoolOptions,
   onSave,
   searchTerm = '',
-  onResetSearch,
   classOrder = {},
   onClassOrderChange,
 }) => {
-  const [filters, setFilters] = useState<DashboardFilterState>(EMPTY_DASHBOARD_FILTERS);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
   const [dialog, setDialog] = useState<ActionDialog | null>(null);
   const [profileDraft, setProfileDraft] = useState({
@@ -65,12 +66,26 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
   const journalButtonRef = useRef<HTMLButtonElement | null>(null);
   const [journalStudentId, setJournalStudentId] = useState<string | null>(null);
   const [journalSort, setJournalSort] = useState<SortOrder | null>(null);
-  const { openSummaryMap } = useRequests();
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const [isActionSummaryExpanded, setIsActionSummaryExpanded] = useState(true);
+  const { openSummaryMap, requests: allRequests, actionOptions } = useRequests();
 
   const catalog = useMemo(() => buildClassCatalog(students), [students]);
   const groups = useMemo(() => buildRosterGroups(students, catalog), [students, catalog]);
-  const summaries = useMemo(() => summarizeGrades(groups), [groups]);
-  const teachers = useMemo(() => listTeachers(catalog), [catalog]);
+
+  const studentIds = useMemo(() => new Set(students.map((student) => student.id)), [students]);
+  const { actionCounts, totalOpenCount } = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const option of actionOptions) counts[option] = 0;
+    let total = 0;
+    for (const request of allRequests) {
+      if (request.status !== 'open' || !studentIds.has(request.studentId)) continue;
+      counts[request.action] = (counts[request.action] ?? 0) + 1;
+      total += 1;
+    }
+    return { actionCounts: counts, totalOpenCount: total };
+  }, [allRequests, actionOptions, studentIds]);
+
   const visibleGroups = useMemo(() => {
     const ordered = groups.map((group) => ({
       ...group,
@@ -78,7 +93,12 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
     }));
     const summaryOf = (id: string) => openSummaryMap[id] ?? emptyOpenSummary();
     const dir = journalSort === 'asc' ? -1 : 1;
-    return filterRosterGroups(ordered, filters, searchTerm, {
+    return filterRosterGroups(ordered, EMPTY_DASHBOARD_FILTERS, searchTerm, {
+      studentVisible: actionFilter === 'all'
+        ? undefined
+        : (student) => allRequests.some((request) =>
+          request.studentId === student.id && request.status === 'open' && request.action === actionFilter
+        ),
       sortStudents: journalSort
         ? (a, b) => compareStudentsByOpenRequests(a, b, summaryOf, compareStudents) * dir
         : undefined,
@@ -95,14 +115,7 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
         }
         : undefined,
     });
-  }, [groups, filters, searchTerm, classOrder, openSummaryMap, journalSort]);
-
-  const totalStudents = groups.reduce((sum, group) => sum + group.currentCount, 0);
-  const totalClasses = groups.length;
-  const totalRemaining = groups.reduce(
-    (sum, group) => sum + (group.classInfo.unassigned ? 0 : Math.max(0, group.remainingSeats)),
-    0
-  );
+  }, [groups, searchTerm, classOrder, openSummaryMap, journalSort, actionFilter, allRequests]);
 
   useEffect(() => {
     setStatusById((prev) => {
@@ -185,25 +198,55 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <GradeSummaryFilter
-        items={summaries}
-        selected={filters.gradeKey}
-        totalStudents={totalStudents}
-        totalClasses={totalClasses}
-        totalRemaining={totalRemaining}
-        onSelect={(key) => setFilters((prev) => ({
-          ...prev,
-          gradeKey: key === 'all' ? 'all' : prev.gradeKey === key ? 'all' : key,
-        }))}
-      />
-
-      <DashboardFilters
-        value={filters}
-        teachers={teachers}
-        onChange={setFilters}
-        onResetSearch={onResetSearch}
-        onResetExtra={() => setJournalSort(null)}
-      />
+      <div className="flex flex-col shrink-0 gap-1">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsActionSummaryExpanded((prev) => !prev)}
+            className="flex items-center gap-1 text-[13px] font-medium text-neutral-600 hover:text-neutral-900 transition-colors"
+          >
+            액션 요약
+            {isActionSummaryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
+        {isActionSummaryExpanded && (
+          <div className={`grid grid-cols-2 md:grid-cols-3 gap-2 ${actionOptions.length + 1 === 6 ? 'lg:grid-cols-6' : 'lg:grid-cols-7'}`}>
+            <div
+              className={actionCardClass(actionFilter === 'all')}
+              onClick={() => setActionFilter('all')}
+            >
+              <div className={['text-[12px] mb-1 truncate font-medium', actionFilter === 'all' ? 'text-neutral-900' : 'text-neutral-500'].join(' ')}>
+                전체
+              </div>
+              <div className="text-[18px] font-semibold leading-none text-neutral-900">
+                {totalOpenCount}
+                <span className="text-[12px] font-normal ml-1 text-neutral-400">건</span>
+              </div>
+            </div>
+            {actionOptions.map((option) => {
+              const selected = actionFilter === option;
+              return (
+                <div
+                  key={option}
+                  className={actionCardClass(selected)}
+                  onClick={() => setActionFilter(selected ? 'all' : option)}
+                >
+                  <div
+                    className={['text-[12px] mb-1 truncate font-medium', selected ? 'text-neutral-900' : 'text-neutral-500'].join(' ')}
+                    title={option}
+                  >
+                    {option}
+                  </div>
+                  <div className="text-[18px] font-semibold leading-none text-neutral-900">
+                    {actionCounts[option] || 0}
+                    <span className="text-[12px] font-normal ml-1 text-neutral-400">건</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden border border-neutral-200 bg-white">
         <div className="flex-1 overflow-auto">
@@ -214,7 +257,7 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
                   key={group.classInfo.id}
                   group={group}
                   collapsed={Boolean(collapsed[group.classInfo.id])}
-                  selectedId={selectedId}
+                  selectedIds={selectedIds}
                   onToggle={() => setCollapsed((prev) => ({
                     ...prev,
                     [group.classInfo.id]: !prev[group.classInfo.id],
@@ -225,7 +268,7 @@ export const CurrentStudentDashboard: React.FC<CurrentStudentDashboardProps> = (
                   onSave={onSave}
                   onMessage={setMessage}
                   onAction={openAction}
-                  onSelect={setSelectedId}
+                  onSelectionChange={setSelectedIds}
                   onReorder={(fromId, toId, place) => handleReorder(
                     group.classInfo.id,
                     group.students.map((student) => student.id),

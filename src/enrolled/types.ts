@@ -45,14 +45,6 @@ export interface ClassRosterGroup {
   matchedStudentIds: string[];
 }
 
-export interface GradeSummaryItem {
-  key: string;
-  label: string;
-  classCount: number;
-  studentCount: number;
-  remainingSeats: number;
-}
-
 export type StudentAction =
   | 'edit-profile'
   | 'move-class'

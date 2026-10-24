@@ -124,7 +124,7 @@ export default function App() {
 
   const studentSearchRef = useRef<HTMLInputElement>(null);
   const journalButtonRef = useRef<HTMLButtonElement | null>(null);
-  const { openSummaryMap } = useRequests();
+  const { openSummaryMap, actionOptions, addActionOption, renameActionOption, removeActionOption } = useRequests();
   const [journalStudentId, setJournalStudentId] = useState<string | null>(null);
 
   // Ctrl/Cmd+F → 상단 앱 검색창 포커스 (브라우저 기본 검색 대신)
@@ -142,6 +142,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsNewStatus, setSettingsNewStatus] = useState('');
   const [settingsNewClass, setSettingsNewClass] = useState('');
+  const [settingsNewAction, setSettingsNewAction] = useState('');
 
   useEffect(() => {
     if (!isSettingsOpen) return;
@@ -519,7 +520,6 @@ export default function App() {
             schoolOptions={schools}
             onSave={handleSaveRow}
             searchTerm={searchTerm}
-            onResetSearch={() => setSearchTerm('')}
             classOrder={enrolledOrderByClass}
             onClassOrderChange={setEnrolledOrderByClass}
           />
@@ -763,89 +763,131 @@ export default function App() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg">
-              <h2 className="text-lg font-bold text-gray-900">목록 설정</h2>
+              <h2 className="text-lg font-bold text-gray-900">{isStudentView ? '원생 목록 설정' : '예비원생 목록 설정'}</h2>
               <button onClick={() => setIsSettingsOpen(false)} className="text-gray-500 hover:text-gray-700">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Status Options */}
-              <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">상태 (Status) 목록</div>
-                <div className="p-3">
-                  <div className="flex gap-2 mb-3">
-                    <input 
-                      type="text" 
-                      value={settingsNewStatus}
-                      onChange={e => setSettingsNewStatus(e.target.value)}
-                      placeholder="새로운 상태 입력..."
-                      className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <button 
-                      onClick={() => {
-                        if (settingsNewStatus.trim() && !statusOptions.includes(settingsNewStatus.trim())) {
-                          setStatusOptions([...statusOptions, settingsNewStatus.trim()]);
-                          setSettingsNewStatus('');
-                        }
-                      }}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
-                    >
-                      추가
-                    </button>
-                  </div>
-                  <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                    {statusOptions.map(status => (
-                      <EditableListItem
-                        key={status}
-                        value={status}
-                        onRename={handleRenameStatus}
-                        confirmDelete
-                        onDelete={() => setStatusOptions(statusOptions.filter(s => s !== status))}
+            {isStudentView ? (
+              <div className="p-4 overflow-y-auto flex-1 grid grid-cols-1 gap-6">
+                {/* Action Options */}
+                <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">액션 (Action) 종류</div>
+                  <div className="p-3">
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={settingsNewAction}
+                        onChange={e => setSettingsNewAction(e.target.value)}
+                        placeholder="새로운 액션 입력..."
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
                       />
-                    ))}
-                  </ul>
+                      <button
+                        onClick={() => {
+                          if (settingsNewAction.trim()) {
+                            addActionOption(settingsNewAction);
+                            setSettingsNewAction('');
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+                      >
+                        추가
+                      </button>
+                    </div>
+                    <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                      {actionOptions.map(action => (
+                        <EditableListItem
+                          key={action}
+                          value={action}
+                          onRename={renameActionOption}
+                          confirmDelete
+                          onDelete={() => removeActionOption(action)}
+                        />
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
+            ) : (
+              <div className="p-4 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              {/* Class Options */}
-              <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">반 (Class) 목록</div>
-                <div className="p-3">
-                  <div className="flex gap-2 mb-3">
-                    <input 
-                      type="text" 
-                      value={settingsNewClass}
-                      onChange={e => setSettingsNewClass(e.target.value)}
-                      placeholder="새로운 반 입력..."
-                      className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <button 
-                      onClick={() => {
-                        if (settingsNewClass.trim() && !classOptions.includes(settingsNewClass.trim())) {
-                          setClassOptions(sortByGradeDesc([...classOptions, settingsNewClass.trim()]));
-                          setSettingsNewClass('');
-                        }
-                      }}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
-                    >
-                      추가
-                    </button>
-                  </div>
-                  <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                    {classOptions.map(cls => (
-                      <EditableListItem 
-                        key={cls} 
-                        value={cls} 
-                        onRename={handleRenameClass}
-                        onDelete={() => setClassOptions(classOptions.filter(c => c !== cls))}
+                {/* Status Options */}
+                <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">상태 (Status) 목록</div>
+                  <div className="p-3">
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={settingsNewStatus}
+                        onChange={e => setSettingsNewStatus(e.target.value)}
+                        placeholder="새로운 상태 입력..."
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
                       />
-                    ))}
-                  </ul>
+                      <button
+                        onClick={() => {
+                          if (settingsNewStatus.trim() && !statusOptions.includes(settingsNewStatus.trim())) {
+                            setStatusOptions([...statusOptions, settingsNewStatus.trim()]);
+                            setSettingsNewStatus('');
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+                      >
+                        추가
+                      </button>
+                    </div>
+                    <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                      {statusOptions.map(status => (
+                        <EditableListItem
+                          key={status}
+                          value={status}
+                          onRename={handleRenameStatus}
+                          confirmDelete
+                          onDelete={() => setStatusOptions(statusOptions.filter(s => s !== status))}
+                        />
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-              </div>
 
-            </div>
+                {/* Class Options */}
+                <div className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 font-semibold text-gray-800 text-sm">반 (Class) 목록</div>
+                  <div className="p-3">
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={settingsNewClass}
+                        onChange={e => setSettingsNewClass(e.target.value)}
+                        placeholder="새로운 반 입력..."
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={() => {
+                          if (settingsNewClass.trim() && !classOptions.includes(settingsNewClass.trim())) {
+                            setClassOptions(sortByGradeDesc([...classOptions, settingsNewClass.trim()]));
+                            setSettingsNewClass('');
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+                      >
+                        추가
+                      </button>
+                    </div>
+                    <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                      {classOptions.map(cls => (
+                        <EditableListItem
+                          key={cls}
+                          value={cls}
+                          onRename={handleRenameClass}
+                          onDelete={() => setClassOptions(classOptions.filter(c => c !== cls))}
+                        />
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -7,7 +7,7 @@ import { StudentTable } from './StudentTable';
 interface ClassGroupProps {
   group: ClassRosterGroup;
   collapsed: boolean;
-  selectedId: string | null;
+  selectedIds: Set<string>;
   onToggle: () => void;
   statusById: Record<string, LearningStatus>;
   journalSort?: SortOrder | null;
@@ -15,7 +15,7 @@ interface ClassGroupProps {
   onSave: (student: Consultation) => void;
   onMessage: (message: string) => void;
   onAction: (student: Consultation, action: StudentAction) => void;
-  onSelect: (id: string) => void;
+  onSelectionChange: (ids: Set<string>) => void;
   onReorder: (fromId: string, toId: string, place: 'before' | 'after') => void;
   onOpenJournal: (student: Consultation, button: HTMLButtonElement | null) => void;
 }
@@ -23,7 +23,7 @@ interface ClassGroupProps {
 export const ClassGroup: React.FC<ClassGroupProps> = ({
   group,
   collapsed,
-  selectedId,
+  selectedIds,
   onToggle,
   statusById,
   journalSort,
@@ -31,7 +31,7 @@ export const ClassGroup: React.FC<ClassGroupProps> = ({
   onSave,
   onMessage,
   onAction,
-  onSelect,
+  onSelectionChange,
   onReorder,
   onOpenJournal,
 }) => (
@@ -42,13 +42,13 @@ export const ClassGroup: React.FC<ClassGroupProps> = ({
         students={group.students}
         matchedStudentIds={group.matchedStudentIds}
         statusById={statusById}
-        selectedId={selectedId}
+        selectedIds={selectedIds}
         journalSort={journalSort}
         onSortJournal={onSortJournal}
         onSave={onSave}
         onMessage={onMessage}
         onAction={onAction}
-        onSelect={onSelect}
+        onSelectionChange={onSelectionChange}
         onReorder={onReorder}
         onOpenJournal={onOpenJournal}
       />

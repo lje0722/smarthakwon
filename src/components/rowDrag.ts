@@ -28,15 +28,23 @@ export const hideDragGhost = (event: ReactDragEvent): void => {
   requestAnimationFrame(() => ghost.remove());
 };
 
-export const rowFillClass = (opts: {
-  dragging: boolean;
-  selected: boolean;
-  searchHit?: boolean;
-}): string => {
+/**
+ * variant 'sticky'는 group-hover를 쓴다. position:sticky 셀은 자기 자신 위에 커서가 있을 때만
+ * hover:가 반응해, 커서가 다른 칸 위에 있으면 그 칸만 회색이 되고 고정 칸은 흰색으로 남아
+ * 행이 컬럼별로 잘린 것처럼 보인다. group-hover는 행(tr, class="group") 전체를 기준으로 반응한다.
+ */
+export const rowFillClass = (
+  opts: {
+    dragging: boolean;
+    selected: boolean;
+    searchHit?: boolean;
+  },
+  variant: 'row' | 'sticky' = 'row'
+): string => {
   if (opts.dragging) return 'bg-blue-100';
   if (opts.selected) return 'bg-blue-50';
   if (opts.searchHit) return 'bg-amber-50/70';
-  return 'bg-white hover:bg-gray-50/80';
+  return variant === 'sticky' ? 'bg-white group-hover:bg-gray-50/80' : 'bg-white hover:bg-gray-50/80';
 };
 
 export const reorderIds = (

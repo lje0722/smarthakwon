@@ -25,6 +25,7 @@ const parseRequest = (raw: unknown): StudentRequest | null => {
   return {
     id: row.id,
     studentId: row.studentId,
+    action: typeof row.action === 'string' && row.action.trim() ? row.action : '기타',
     content: row.content,
     priority: row.priority,
     status: row.status,
